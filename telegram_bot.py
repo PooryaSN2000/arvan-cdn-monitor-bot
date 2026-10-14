@@ -32,6 +32,11 @@ from arvan_api import (
     PERIOD_LIST
 )
 
+try:
+    from nova_api import NovaClient
+except ImportError:
+    NovaClient = None
+
 CONFIG_FILE = "bot_config.json"
 
 DEFAULT_CONFIG = {
@@ -44,8 +49,25 @@ DEFAULT_CONFIG = {
     "auto_alert_enabled": True,
     "alert_threshold_percent": 75.0,
     "send_periodic_summary": True,
-    "spike_alert_enabled": True
+    "spike_alert_enabled": True,
+    "nova_api_url": os.getenv("NOVA_API_URL", ""),
+    "nova_api_key": os.getenv("NOVA_API_KEY", "")
 }
+
+
+def get_nova_client() -> Optional[Any]:
+    """Retrieve NovaClient instance if configured, otherwise None."""
+    if NovaClient is None:
+        return None
+    cfg = load_config()
+    url = cfg.get("nova_api_url", "").strip()
+    key = cfg.get("nova_api_key", "").strip()
+    if url and key and not key.startswith("YOUR_"):
+        try:
+            return NovaClient(api_url=url, api_key=key)
+        except Exception:
+            return None
+    return None
 
 
 def load_config() -> Dict[str, Any]:
@@ -173,6 +195,8 @@ def get_main_keyboard():
         types.KeyboardButton("🌐 لیست دامنه‌ها"),
         types.KeyboardButton("⚙️ وضعیت و تنظیمات")
     )
+    if get_nova_client() is not None:
+        markup.add(types.KeyboardButton("🛡 پنل VPN (کاربران آنلاین و مصرف)"))
     return markup
 
 
@@ -609,6 +633,7 @@ def handle_settings(message):
     auto_alert = "فعال ✅" if config.get("auto_alert_enabled", True) else "غیرفعال ❌"
     spike_alert = "فعال ✅" if config.get("spike_alert_enabled", True) else "غیرفعال ❌"
     summary = "فعال ✅" if config.get("send_periodic_summary", True) else "غیرفعال ❌"
+    nova_status = "متصل و فعال ✅" if get_nova_client() is not None else "غیرفعال (تنظیم نشده) ⚪️"
 
     admins_str = ", ".join(f"<code>{a}</code>" for a in admins) if admins else "تنظیم نشده"
 
@@ -620,7 +645,8 @@ def handle_settings(message):
         f"💰 <b>تعرفه هر گیگ مازاد:</b> {cost} تومان\n"
         f"🔔 <b>هشدار عبور از سقف:</b> {auto_alert}\n"
         f"⚡️ <b>تشخیص جهش ناگهانی (Spike):</b> {spike_alert}\n"
-        f"📋 <b>ارسال خلاصه وضعیت دوره‌ای:</b> {summary}\n\n"
+        f"📋 <b>ارسال خلاصه وضعیت دوره‌ای:</b> {summary}\n"
+        f"🛡 <b>پنل VPN (Nova):</b> {nova_status}\n\n"
         "<b>دستورات مدیریتی ادمین:</b>\n"
         "• <code>/addadmin 123456789</code> - اضافه کردن ادمین\n"
         "• <code>/deladmin 123456789</code> - حذف ادمین\n"
@@ -754,6 +780,309 @@ def handle_toggle_summary(message):
     save_config(config)
     st = "فعال ✅" if config["send_periodic_summary"] else "غیرفعال ❌"
     bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای (هر {config.get('check_interval_minutes', 30)} دقیقه): {st}")
+
+
+# ==================== Nova VPN Panel (Optional Integration) ====================
+
+@bot.message_handler(func=lambda msg: msg.text in ["🛡 پنل VPN (کاربران آنلاین و مصرف)", "/vpn", "/nova"])
+@admin_only
+def handle_nova_menu(message):
+    chat_id = message.chat.id
+    client = get_nova_client()
+    if not client:
+        bot.send_message(chat_id, "⚠️ پنل VPN تنظیم نشده است یا در فایل تنظیمات فعال نیست.")
+        return
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🟢 کاربران آنلاین و حجم مصرفی", callback_data="nova:online"),
+        types.InlineKeyboardButton("👥 تمام کاربران و وضعیت حجم", callback_data="nova:users:0"),
+        types.InlineKeyboardButton("🔄 بررسی وضعیت اتصال به پنل", callback_data="nova:health")
+    )
+
+    welcome_nova = (
+        "🛡 <b>مدیریت و مانیتورینگ پنل VPN (Nova)</b>\n\n"
+        "💡 لطفاً یکی از گزینه‌های زیر را انتخاب کنید:\n"
+        "• مشاهده کاربران آنلاین هم‌اکنون به همراه تعداد دستگاه‌ها و حجم مصرفی\n"
+        "• مشاهده لیست تمام کاربران و فعال/غیرفعال‌سازی سریع اکانت‌ها"
+    )
+    bot.send_message(chat_id, welcome_nova, reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "nova:menu")
+@admin_only
+def callback_nova_menu(call):
+    chat_id = call.message.chat.id
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("🟢 کاربران آنلاین و حجم مصرفی", callback_data="nova:online"),
+        types.InlineKeyboardButton("👥 تمام کاربران و وضعیت حجم", callback_data="nova:users:0"),
+        types.InlineKeyboardButton("🔄 بررسی وضعیت اتصال به پنل", callback_data="nova:health")
+    )
+    welcome_nova = (
+        "🛡 <b>مدیریت و مانیتورینگ پنل VPN (Nova)</b>\n\n"
+        "💡 لطفاً یکی از گزینه‌های زیر را انتخاب کنید:\n"
+        "• مشاهده کاربران آنلاین هم‌اکنون به همراه تعداد دستگاه‌ها و حجم مصرفی\n"
+        "• مشاهده لیست تمام کاربران و فعال/غیرفعال‌سازی سریع اکانت‌ها"
+    )
+    try:
+        bot.edit_message_text(welcome_nova, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
+    except Exception:
+        bot.send_message(chat_id, welcome_nova, reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "nova:online")
+@admin_only
+def callback_nova_online(call):
+    chat_id = call.message.chat.id
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, text="در حال استخراج کاربران آنلاین...")
+    try:
+        summary = client.get_online_summary()
+        users = summary.get("users", [])
+        total_online = summary.get("total_online_users", len(users))
+        total_devices = summary.get("total_devices", sum(u.get("devices", 0) for u in users))
+
+        if not users:
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🔄 به‌روزرسانی", callback_data="nova:online"))
+            markup.add(types.InlineKeyboardButton("🔙 بازگشت به منوی VPN", callback_data="nova:menu"))
+            bot.edit_message_text(
+                "🟢 <b>کاربران آنلاین پنل VPN:</b>\n\n"
+                "هم‌اکنون هیچ کاربری آنلاین نیست (تعداد دستگاه‌های متصل: 0).",
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=markup
+            )
+            return
+
+        lines = [
+            "🟢 <b>کاربران آنلاین پنل VPN (Nova)</b>",
+            f"⚡️ <b>تعداد کاربران متصل:</b> {total_online} نفر | <b>کل دستگاه‌های فعال:</b> {total_devices}\n"
+        ]
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        user_buttons = []
+
+        for u in users:
+            uid = u["id"]
+            name = u["name"]
+            devs = u["devices"]
+            used_b = u["used_bytes"]
+            quota_b = u["quota_bytes"]
+            pct = (used_b / quota_b * 100.0) if quota_b > 0 else 0.0
+            bar = generate_progress_bar(pct, length=10)
+            status_dot = "🟢" if u.get("enabled", True) else "🔴"
+
+            lines.append(
+                f"{status_dot} 👤 <b>{name}</b> ({devs} دستگاه 📱)\n"
+                f"  • مصرف حجم: <b>{format_bytes(used_b)}</b> از {format_bytes(quota_b)} ({pct:.1f}%)\n"
+                f"  • پیشرفت: <code>[{bar}]</code>\n"
+            )
+            user_buttons.append(types.InlineKeyboardButton(f"⚙️ {name}", callback_data=f"nova:user:{uid}"))
+
+        if user_buttons:
+            markup.add(*user_buttons)
+
+        markup.add(
+            types.InlineKeyboardButton("🔄 به‌روزرسانی آنلاین‌ها", callback_data="nova:online"),
+            types.InlineKeyboardButton("🔙 بازگشت", callback_data="nova:menu")
+        )
+
+        bot.edit_message_text(
+            "\n".join(lines),
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup
+        )
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ خطا در دریافت اطلاعات کاربران آنلاین: {e}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("nova:users:"))
+@admin_only
+def callback_nova_all_users(call):
+    chat_id = call.message.chat.id
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    page = int(call.data.split(":")[2])
+    bot.answer_callback_query(call.id, text="دریافت لیست کاربران...")
+
+    try:
+        all_users = client.get_all_users()
+        online_data = client._request("online").get("online", {})
+        page_size = 8
+        total_users = len(all_users)
+        total_pages = max(1, (total_users + page_size - 1) // page_size)
+
+        page = max(0, min(page, total_pages - 1))
+        page_users = all_users[page * page_size : (page + 1) * page_size]
+
+        lines = [
+            f"👥 <b>لیست تمام کاربران پنل VPN</b> (صفحه {page + 1} از {total_pages})",
+            f"📊 کل کاربران ثبت‌شده: {total_users} نفر\n"
+        ]
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        user_buttons = []
+
+        for idx, u in enumerate(page_users, 1 + page * page_size):
+            uid = u["id"]
+            name = u.get("name", uid)
+            enabled = u.get("enabled", True)
+            status_emoji = "🟢" if enabled else "🔴"
+            devs = online_data.get(uid, 0)
+            conn_emoji = f"⚡️ آنلاین ({devs})" if devs > 0 else "⚪️ آفلاین"
+            used_b = u.get("used", 0)
+            quota_b = u.get("quotaBytes", 0)
+            pct = (used_b / quota_b * 100.0) if quota_b > 0 else 0.0
+
+            lines.append(
+                f"{idx}. {status_emoji} <b>{name}</b> ({conn_emoji})\n"
+                f"   • مصرف: <b>{format_bytes(used_b)}</b> / {format_bytes(quota_b)} ({pct:.1f}%)\n"
+            )
+            user_buttons.append(types.InlineKeyboardButton(f"{status_emoji} {name}", callback_data=f"nova:user:{uid}"))
+
+        if user_buttons:
+            markup.add(*user_buttons)
+
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(types.InlineKeyboardButton("⬅️ قبلی", callback_data=f"nova:users:{page - 1}"))
+        nav_buttons.append(types.InlineKeyboardButton(f"📄 {page + 1} / {total_pages}", callback_data="nova:noop"))
+        if page < total_pages - 1:
+            nav_buttons.append(types.InlineKeyboardButton("بعدی ➡️", callback_data=f"nova:users:{page + 1}"))
+
+        markup.row(*nav_buttons)
+        markup.add(
+            types.InlineKeyboardButton("🟢 مشاهده فقط آنلاین‌ها", callback_data="nova:online"),
+            types.InlineKeyboardButton("🔙 بازگشت به منوی VPN", callback_data="nova:menu")
+        )
+
+        bot.edit_message_text(
+            "\n".join(lines),
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup
+        )
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ خطا در دریافت لیست کاربران: {e}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("nova:user:"))
+@admin_only
+def callback_nova_user_detail(call):
+    chat_id = call.message.chat.id
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    uid = call.data.split(":")[2]
+    bot.answer_callback_query(call.id, text="دریافت مشخصات کاربر...")
+
+    try:
+        u = client.get_user(uid)
+        if not u:
+            bot.send_message(chat_id, f"❌ کاربری با شناسه {uid} یافت نشد.")
+            return
+
+        online_data = client._request("online").get("online", {})
+        devs = online_data.get(uid, 0)
+        conn_str = f"⚡️ آنلاین ({devs} دستگاه فعال)" if devs > 0 else "⚪️ آفلاین"
+
+        name = u.get("name", uid)
+        enabled = u.get("enabled", True)
+        used_b = u.get("used", 0)
+        up_b = u.get("up", 0)
+        down_b = u.get("down", 0)
+        quota_b = u.get("quotaBytes", 0)
+        pct = (used_b / quota_b * 100.0) if quota_b > 0 else 0.0
+        bar = generate_progress_bar(pct, length=12)
+        expiry = u.get("expiry") or "نامحدود"
+
+        status_text = "فعال 🟢" if enabled else "غیرفعال (مسدود) 🔴"
+        next_action_text = "🔴 غیرفعال‌سازی اکانت" if enabled else "🟢 فعال‌سازی اکانت"
+        next_state = "disable" if enabled else "enable"
+
+        text = (
+            f"👤 <b>مدیریت کاربر: {name}</b>\n\n"
+            f"🆔 <b>شناسه:</b> <code>{uid}</code>\n"
+            f"🔘 <b>وضعیت اکانت:</b> <b>{status_text}</b>\n"
+            f"📡 <b>وضعیت اتصال:</b> {conn_str}\n\n"
+            f"📊 <b>میزان مصرف:</b> <b>{format_bytes(used_b)}</b> از <b>{format_bytes(quota_b)}</b> ({pct:.1f}%)\n"
+            f"📈 پیشرفت مصرف: <code>[{bar}]</code>\n"
+            f"⬆️ آپلود: {format_bytes(up_b)} | ⬇️ دانلود: {format_bytes(down_b)}\n"
+            f"⏳ <b>تاریخ انقضا:</b> {expiry}\n"
+        )
+
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton(next_action_text, callback_data=f"nova:toggle:{uid}:{next_state}"),
+            types.InlineKeyboardButton("🔄 به‌روزرسانی اطلاعات", callback_data=f"nova:user:{uid}"),
+            types.InlineKeyboardButton("🔙 بازگشت به لیست تمام کاربران", callback_data="nova:users:0")
+        )
+
+        bot.edit_message_text(
+            text,
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup
+        )
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ خطا در دریافت مشخصات کاربر: {e}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("nova:toggle:"))
+@admin_only
+def callback_nova_toggle_user(call):
+    _, _, uid, action = call.data.split(":")
+    chat_id = call.message.chat.id
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    target_enabled = (action == "enable")
+    bot.answer_callback_query(call.id, text="در حال تغییر وضعیت کاربر در پنل...")
+    try:
+        ok = client.toggle_user(uid, target_enabled)
+        if ok:
+            st = "فعال شد 🟢" if target_enabled else "غیرفعال شد 🔴"
+            bot.answer_callback_query(call.id, text=f"کاربر با موفقیت {st}", show_alert=True)
+            # Re-render user detail card
+            call.data = f"nova:user:{uid}"
+            callback_nova_user_detail(call)
+        else:
+            bot.answer_callback_query(call.id, text="❌ تغییر وضعیت انجام نشد.", show_alert=True)
+    except Exception as e:
+        bot.answer_callback_query(call.id, text=f"خطا: {e}", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "nova:health")
+@admin_only
+def callback_nova_health(call):
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id, text="بررسی ارتباط با پنل...")
+    is_ok = client.is_healthy()
+    status_str = "متصل و فعال ✅" if is_ok else "قطع یا خطا در احراز هویت ❌"
+    bot.answer_callback_query(call.id, text=f"وضعیت اتصال به پنل: {status_str}", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "nova:noop")
+@admin_only
+def callback_nova_noop(call):
+    bot.answer_callback_query(call.id)
 
 
 @bot.message_handler(func=lambda message: True)

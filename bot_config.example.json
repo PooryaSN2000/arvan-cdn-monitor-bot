@@ -8,5 +8,8 @@
   "auto_alert_enabled": true,
   "alert_threshold_percent": 75.0,
   "send_periodic_summary": true,
-  "spike_alert_enabled": true
+  "spike_alert_enabled": true,
+  "_comment_nova": "Optional: Nova VPN panel connection (leave empty if not used)",
+  "nova_api_url": "",
+  "nova_api_key": ""
 }
