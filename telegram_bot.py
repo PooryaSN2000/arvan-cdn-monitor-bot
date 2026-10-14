@@ -793,18 +793,22 @@ def handle_nova_menu(message):
         bot.send_message(chat_id, "⚠️ پنل VPN تنظیم نشده است یا در فایل تنظیمات فعال نیست.")
         return
 
-    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("🟢 کاربران آنلاین و حجم مصرفی", callback_data="nova:online"),
+        types.InlineKeyboardButton("🟢 کاربران آنلاین و مصرف", callback_data="nova:online"),
+        types.InlineKeyboardButton("📊 سلامت زنده سرور", callback_data="nova:stats"),
+        types.InlineKeyboardButton("⚠️ کاربران نیازمند تمدید", callback_data="nova:alerts"),
         types.InlineKeyboardButton("👥 تمام کاربران و وضعیت حجم", callback_data="nova:users:0"),
-        types.InlineKeyboardButton("🔄 بررسی وضعیت اتصال به پنل", callback_data="nova:health")
+        types.InlineKeyboardButton("🔄 تست اتصال به پنل", callback_data="nova:health")
     )
 
     welcome_nova = (
-        "🛡 <b>مدیریت و مانیتورینگ پنل VPN (Nova)</b>\n\n"
-        "💡 لطفاً یکی از گزینه‌های زیر را انتخاب کنید:\n"
-        "• مشاهده کاربران آنلاین هم‌اکنون به همراه تعداد دستگاه‌ها و حجم مصرفی\n"
-        "• مشاهده لیست تمام کاربران و فعال/غیرفعال‌سازی سریع اکانت‌ها"
+        "🛡 <b>مدیریت و مانیتورینگ پیشرفته پنل VPN (Nova)</b>\n\n"
+        "💡 لطفاً یکی از گزینه‌های زیر را انتخاب فرمایید:\n\n"
+        "• <b>🟢 کاربران آنلاین:</b> مشاهده کاربران متصل، دستگاه‌های فعال و حجم مصرفی\n"
+        "• <b>📊 سلامت زنده سرور:</b> درصد مصرف CPU, RAM, دیسک، وضعیت هسته‌ها و اتصالات زنده\n"
+        "• <b>⚠️ کاربران نیازمند تمدید:</b> افراد در آستانه اتمام سقف (بالای ۸۵٪) یا انقضا (کمتر از ۳ روز)\n"
+        "• <b>👥 تمام کاربران:</b> کارت مشخصات هر کاربر، افزایش حجم، ریست مصرف و فعال/غیرفعال‌سازی"
     )
     bot.send_message(chat_id, welcome_nova, reply_markup=markup)
 
@@ -813,17 +817,21 @@ def handle_nova_menu(message):
 @admin_only
 def callback_nova_menu(call):
     chat_id = call.message.chat.id
-    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("🟢 کاربران آنلاین و حجم مصرفی", callback_data="nova:online"),
+        types.InlineKeyboardButton("🟢 کاربران آنلاین و مصرف", callback_data="nova:online"),
+        types.InlineKeyboardButton("📊 سلامت زنده سرور", callback_data="nova:stats"),
+        types.InlineKeyboardButton("⚠️ کاربران نیازمند تمدید", callback_data="nova:alerts"),
         types.InlineKeyboardButton("👥 تمام کاربران و وضعیت حجم", callback_data="nova:users:0"),
-        types.InlineKeyboardButton("🔄 بررسی وضعیت اتصال به پنل", callback_data="nova:health")
+        types.InlineKeyboardButton("🔄 تست اتصال به پنل", callback_data="nova:health")
     )
     welcome_nova = (
-        "🛡 <b>مدیریت و مانیتورینگ پنل VPN (Nova)</b>\n\n"
-        "💡 لطفاً یکی از گزینه‌های زیر را انتخاب کنید:\n"
-        "• مشاهده کاربران آنلاین هم‌اکنون به همراه تعداد دستگاه‌ها و حجم مصرفی\n"
-        "• مشاهده لیست تمام کاربران و فعال/غیرفعال‌سازی سریع اکانت‌ها"
+        "🛡 <b>مدیریت و مانیتورینگ پیشرفته پنل VPN (Nova)</b>\n\n"
+        "💡 لطفاً یکی از گزینه‌های زیر را انتخاب فرمایید:\n\n"
+        "• <b>🟢 کاربران آنلاین:</b> مشاهده کاربران متصل، دستگاه‌های فعال و حجم مصرفی\n"
+        "• <b>📊 سلامت زنده سرور:</b> درصد مصرف CPU, RAM, دیسک، وضعیت هسته‌ها و اتصالات زنده\n"
+        "• <b>⚠️ کاربران نیازمند تمدید:</b> افراد در آستانه اتمام سقف (بالای ۸۵٪) یا انقضا (کمتر از ۳ روز)\n"
+        "• <b>👥 تمام کاربران:</b> کارت مشخصات هر کاربر، افزایش حجم، ریست مصرف و فعال/غیرفعال‌سازی"
     )
     try:
         bot.edit_message_text(welcome_nova, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
@@ -1023,11 +1031,22 @@ def callback_nova_user_detail(call):
             f"⏳ <b>تاریخ انقضا:</b> {expiry}\n"
         )
 
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.row(
+            types.InlineKeyboardButton("➕ ۱۰ گیگابایت", callback_data=f"nova:add_quota:{uid}:10"),
+            types.InlineKeyboardButton("➕ ۲۰ گیگابایت", callback_data=f"nova:add_quota:{uid}:20")
+        )
+        markup.row(
+            types.InlineKeyboardButton("🔄 صفر کردن مصرف", callback_data=f"nova:reset_traffic:{uid}"),
+            types.InlineKeyboardButton("⏳ تمدید ۳۰ روز", callback_data=f"nova:extend:{uid}:30")
+        )
+        markup.row(
             types.InlineKeyboardButton(next_action_text, callback_data=f"nova:toggle:{uid}:{next_state}"),
-            types.InlineKeyboardButton("🔄 به‌روزرسانی اطلاعات", callback_data=f"nova:user:{uid}"),
-            types.InlineKeyboardButton("🔙 بازگشت به لیست تمام کاربران", callback_data="nova:users:0")
+            types.InlineKeyboardButton("🔄 به‌روزرسانی", callback_data=f"nova:user:{uid}")
+        )
+        markup.row(
+            types.InlineKeyboardButton("🔙 لیست تمام کاربران", callback_data="nova:users:0"),
+            types.InlineKeyboardButton("🔙 منوی اصلی VPN", callback_data="nova:menu")
         )
 
         bot.edit_message_text(
@@ -1085,6 +1104,235 @@ def callback_nova_noop(call):
     bot.answer_callback_query(call.id)
 
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("nova:add_quota:"))
+@admin_only
+def callback_nova_add_quota(call):
+    _, _, uid, gb_str = call.data.split(":")
+    gb = float(gb_str)
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, text=f"در حال افزایش {gb:g} گیگابایت حجم...")
+    try:
+        ok = client.add_user_quota(uid, gb)
+        if ok:
+            bot.answer_callback_query(call.id, text=f"✅ {gb:g} گیگابایت با موفقیت به سقف کاربر افزوده شد.", show_alert=True)
+            call.data = f"nova:user:{uid}"
+            callback_nova_user_detail(call)
+        else:
+            bot.answer_callback_query(call.id, text="❌ خطا در افزایش حجم کاربر.", show_alert=True)
+    except Exception as e:
+        bot.answer_callback_query(call.id, text=f"خطا: {e}", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("nova:extend:"))
+@admin_only
+def callback_nova_extend(call):
+    _, _, uid, days_str = call.data.split(":")
+    days = int(days_str)
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, text=f"در حال تمدید {days} روزه اشتراک...")
+    try:
+        ok = client.extend_user_expiry(uid, days)
+        if ok:
+            bot.answer_callback_query(call.id, text=f"✅ تاریخ انقضای کاربر با موفقیت {days} روز تمدید شد.", show_alert=True)
+            call.data = f"nova:user:{uid}"
+            callback_nova_user_detail(call)
+        else:
+            bot.answer_callback_query(call.id, text="❌ خطا در تمدید انقضا.", show_alert=True)
+    except Exception as e:
+        bot.answer_callback_query(call.id, text=f"خطا: {e}", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("nova:reset_traffic:"))
+@admin_only
+def callback_nova_reset_traffic(call):
+    _, _, uid = call.data.split(":")
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, text="در حال صفر کردن مصرف کاربر...")
+    try:
+        ok = client.reset_user_traffic(uid)
+        if ok:
+            bot.answer_callback_query(call.id, text="✅ مصرف ترافیک کاربر با موفقیت صفر (ریست) شد.", show_alert=True)
+            call.data = f"nova:user:{uid}"
+            callback_nova_user_detail(call)
+        else:
+            bot.answer_callback_query(call.id, text="❌ خطا در صفر کردن مصرف کاربر.", show_alert=True)
+    except Exception as e:
+        bot.answer_callback_query(call.id, text=f"خطا: {e}", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "nova:stats")
+@admin_only
+def callback_nova_stats(call):
+    chat_id = call.message.chat.id
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, text="دریافت آمار زنده سرور...")
+    try:
+        stats = client.get_node_stats()
+        system = stats.get("system", {})
+        traffic = stats.get("traffic", {})
+
+        # CPU metrics
+        cpu = system.get("cpu", {})
+        cpu_pct = float(cpu.get("pct", 0))
+        cpu_cores = cpu.get("cores", 1)
+        cpu_load = cpu.get("load1", 0)
+        cpu_bar = generate_progress_bar(cpu_pct, length=10)
+
+        # RAM metrics
+        mem = system.get("mem", {})
+        mem_pct = float(mem.get("pct", 0))
+        mem_used = mem.get("used", 0)
+        mem_total = mem.get("total", 0)
+        mem_bar = generate_progress_bar(mem_pct, length=10)
+
+        # Disk metrics
+        disk = system.get("disk", {})
+        disk_pct = float(disk.get("pct", 0))
+        disk_used = disk.get("used", 0)
+        disk_total = disk.get("total", 0)
+        disk_bar = generate_progress_bar(disk_pct, length=10)
+
+        # Tunnel core status
+        xray_ok = system.get("xray", False)
+        singbox_ok = system.get("singbox", False)
+        xray_st = "🟢 آنلاین" if xray_ok else "🔴 آفلاین"
+        singbox_st = "🟢 آنلاین" if singbox_ok else "🔴 آفلاین"
+        xray_ver = system.get("xrayVersion", "N/A")
+
+        # Network connections
+        tcp = system.get("tcpConns", 0)
+        udp = system.get("udpConns", 0)
+
+        # Today traffic
+        today_up = traffic.get("todayUp", 0)
+        today_down = traffic.get("todayDown", 0)
+        today_total = traffic.get("today", 0)
+
+        # Server Geo & Hostname
+        host = stats.get("host", system.get("hostname", "Node"))
+        geo = system.get("geo", {})
+        isp = geo.get("isp", "Hetzner")
+        country = geo.get("country", "")
+
+        text = (
+            f"📊 <b>داشبورد زنده سلامت سرور و منابع (Nova Node)</b>\n"
+            f"🌐 <b>هاست:</b> <code>{host}</code> ({country} - {isp})\n\n"
+            f"⚙️ <b>مصرف پردازنده (CPU - {cpu_cores} هسته):</b> <b>{cpu_pct:.1f}%</b> (Load: {cpu_load})\n"
+            f"<code>[{cpu_bar}]</code>\n\n"
+            f"🧠 <b>حافظه رم (RAM):</b> <b>{mem_pct:.1f}%</b> ({format_bytes(mem_used)} / {format_bytes(mem_total)})\n"
+            f"<code>[{mem_bar}]</code>\n\n"
+            f"💾 <b>فضای دیسک (Disk):</b> <b>{disk_pct:.1f}%</b> ({format_bytes(disk_used)} / {format_bytes(disk_total)})\n"
+            f"<code>[{disk_bar}]</code>\n\n"
+            f"─────────────────────\n"
+            f"🛠 <b>وضعیت سرویس‌های تونل:</b>\n"
+            f"  • هسته Xray: {xray_st} (نسخه {xray_ver})\n"
+            f"  • هسته Sing-box: {singbox_st}\n\n"
+            f"📡 <b>اتصالات فعال زنده:</b>\n"
+            f"  • اتصالات TCP فعال: <b>{tcp:,}</b>\n"
+            f"  • اتصالات UDP فعال: <b>{udp:,}</b>\n\n"
+            f"📦 <b>ترافیک مصرفی سرور در روز جاری:</b>\n"
+            f"  • مجموع امروز: <b>{format_bytes(today_total)}</b>\n"
+            f"  • ⬆️ آپلود: {format_bytes(today_up)} | ⬇️ دانلود: {format_bytes(today_down)}"
+        )
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🔄 به‌روزرسانی آمار", callback_data="nova:stats"),
+            types.InlineKeyboardButton("🔙 بازگشت به منوی VPN", callback_data="nova:menu")
+        )
+
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ خطا در دریافت آمار سرور: {e}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "nova:alerts")
+@admin_only
+def callback_nova_alerts(call):
+    chat_id = call.message.chat.id
+    client = get_nova_client()
+    if not client:
+        bot.answer_callback_query(call.id, text="پنل VPN تنظیم نشده است.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, text="بررسی سقف و انقضای کاربران...")
+    try:
+        alerts = client.get_expiring_or_quota_users(quota_threshold_pct=85.0, days_threshold=3)
+        nearing_quota = alerts.get("nearing_quota", [])
+        nearing_expiry = alerts.get("nearing_expiry", [])
+
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        user_buttons = []
+
+        lines = [
+            "⚠️ <b>گزارش کاربران نیازمند تمدید (VPN)</b>\n"
+        ]
+
+        if not nearing_quota and not nearing_expiry:
+            lines.append("✅ همه کاربران در وضعیت مطلوب هستند و در حال حاضر هیچ اکانتی در آستانه اتمام سقف (بالای ۸۵٪) یا انقضا (کمتر از ۳ روز) نیست.")
+        else:
+            if nearing_quota:
+                lines.append("📦 <b>کاربران در آستانه اتمام حجم (بالای ۸۵٪):</b>")
+                for u in nearing_quota:
+                    uid = u["id"]
+                    name = u["name"]
+                    used_b = u.get("used", 0)
+                    quota_b = u.get("quotaBytes", 0)
+                    pct = u.get("pct", 0.0)
+                    bar = generate_progress_bar(pct, length=8)
+                    lines.append(
+                        f"  🔸 👤 <b>{name}</b>: {format_bytes(used_b)} از {format_bytes(quota_b)} ({pct:.1f}%)\n"
+                        f"     <code>[{bar}]</code>"
+                    )
+                    user_buttons.append(types.InlineKeyboardButton(f"⚙️ {name}", callback_data=f"nova:user:{uid}"))
+                lines.append("")
+
+            if nearing_expiry:
+                lines.append("⏳ <b>کاربران در آستانه انقضای زمانی (کمتر از ۳ روز):</b>")
+                for u in nearing_expiry:
+                    uid = u["id"]
+                    name = u["name"]
+                    days = u.get("days_left", 0)
+                    exp = u.get("expiry", "")
+                    if days < 0:
+                        exp_str = f"منقضی شده ({abs(days)} روز پیش)"
+                    elif days == 0:
+                        exp_str = "امروز منقضی می‌شود!"
+                    else:
+                        exp_str = f"{days} روز دیگر ({exp})"
+                    lines.append(f"  🔸 👤 <b>{name}</b>: {exp_str}")
+                    if uid not in [b.callback_data.split(":")[-1] for b in user_buttons]:
+                        user_buttons.append(types.InlineKeyboardButton(f"⚙️ {name}", callback_data=f"nova:user:{uid}"))
+
+        if user_buttons:
+            markup.add(*user_buttons)
+
+        markup.add(
+            types.InlineKeyboardButton("🔄 به‌روزرسانی", callback_data="nova:alerts"),
+            types.InlineKeyboardButton("🔙 بازگشت به منوی VPN", callback_data="nova:menu")
+        )
+
+        bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ خطا در استخراج گزارش تمدید: {e}")
+
+
 @bot.message_handler(func=lambda message: True)
 @admin_only
 def handle_unknown_message(message):
@@ -1096,6 +1344,7 @@ def handle_unknown_message(message):
 def background_monitor_worker():
     print("🚀 Background Monitor Worker started.")
     last_alert_status = {}
+    last_nova_alerted_quota = set()
 
     while True:
         try:
@@ -1193,6 +1442,31 @@ def background_monitor_worker():
                                     bot.send_message(cid, alert_msg)
                                 except Exception as e:
                                     print(f"Error sending alert to {cid}: {e}")
+
+                # 4. Optional VPN Panel Quota Alerts (if Nova panel is configured)
+                nova_cli = get_nova_client()
+                if nova_cli and auto_alert:
+                    try:
+                        vpn_alerts = nova_cli.get_expiring_or_quota_users(quota_threshold_pct=90.0, days_threshold=2)
+                        for u in vpn_alerts.get("nearing_quota", []):
+                            uid = u["id"]
+                            if uid not in last_nova_alerted_quota:
+                                last_nova_alerted_quota.add(uid)
+                                u_name = u.get("name", uid)
+                                u_pct = u.get("pct", 0.0)
+                                alert_vpn = (
+                                    f"⚠️ <b>هشدار پنل VPN: مصرف سقف مجاز کاربر!</b>\n\n"
+                                    f"👤 کاربر: <code>{u_name}</code>\n"
+                                    f"📦 مصرف: <b>{format_bytes(u.get('used', 0))}</b> از {format_bytes(u.get('quotaBytes', 0))} ({u_pct:.1f}%)\n"
+                                    f"💡 جهت افزایش سقف یا تمدید از منوی ربات اقدام فرمایید."
+                                )
+                                for cid in admin_ids:
+                                    try:
+                                        bot.send_message(cid, alert_vpn)
+                                    except Exception as e:
+                                        print(f"Error sending VPN quota alert: {e}")
+                    except Exception as e:
+                        print(f"Error in background VPN alert check: {e}")
 
                 # Record current domain status to avoid duplicate notifications in subsequent cycles
                 for item in limit_items:

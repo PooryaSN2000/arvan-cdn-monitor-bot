@@ -7,6 +7,7 @@ import json
 import urllib.request
 import urllib.error
 import urllib.parse
+import datetime
 from typing import List, Dict, Any, Optional
 
 from arvan_api import format_bytes, generate_progress_bar
@@ -129,3 +130,103 @@ class NovaClient:
             data={"enabled": enabled}
         )
         return bool(res.get("ok"))
+
+    def get_node_stats(self) -> Dict[str, Any]:
+        """Fetch live hardware and network stats from /api/v1/stats."""
+        return self._request("stats")
+
+    def get_expiring_or_quota_users(
+        self,
+        quota_threshold_pct: float = 85.0,
+        days_threshold: int = 3
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Fetch users that are nearing/exceeding their quota or nearing expiration.
+        """
+        users = self.get_all_users()
+        today = datetime.date.today()
+
+        nearing_quota = []
+        nearing_expiry = []
+
+        for u in users:
+            quota_b = u.get("quotaBytes", 0)
+            used_b = u.get("used", 0)
+            expiry_str = u.get("expiry", "")
+
+            # Check quota usage
+            if quota_b > 0:
+                pct = (used_b / quota_b) * 100.0
+                if pct >= quota_threshold_pct:
+                    u_item = dict(u)
+                    u_item["pct"] = pct
+                    nearing_quota.append(u_item)
+
+            # Check expiration date
+            if expiry_str:
+                try:
+                    exp_date = datetime.datetime.strptime(expiry_str, "%Y-%m-%d").date()
+                    days_left = (exp_date - today).days
+                    if days_left <= days_threshold:
+                        u_item = dict(u)
+                        u_item["days_left"] = days_left
+                        nearing_expiry.append(u_item)
+                except Exception:
+                    pass
+
+        nearing_quota.sort(key=lambda x: x.get("pct", 0), reverse=True)
+        nearing_expiry.sort(key=lambda x: x.get("days_left", 999))
+
+        return {
+            "nearing_quota": nearing_quota,
+            "nearing_expiry": nearing_expiry
+        }
+
+    def add_user_quota(self, user_id: str, additional_gb: float) -> bool:
+        """Increase user quota by additional_gb."""
+        user = self.get_user(user_id)
+        if not user:
+            return False
+        current_quota = user.get("quotaBytes", 0)
+        additional_bytes = int(additional_gb * (1024 ** 3))
+        new_quota = current_quota + additional_bytes
+        res = self._request(
+            f"users/{urllib.parse.quote(user_id)}",
+            method="PATCH",
+            data={"quotaBytes": new_quota}
+        )
+        return bool(res.get("ok"))
+
+    def reset_user_traffic(self, user_id: str) -> bool:
+        """Reset user consumed traffic back to 0."""
+        res = self._request(
+            f"users/{urllib.parse.quote(user_id)}",
+            method="PATCH",
+            data={"used": 0, "up": 0, "down": 0}
+        )
+        return bool(res.get("ok"))
+
+    def extend_user_expiry(self, user_id: str, days: int = 30) -> bool:
+        """Extend user expiration date by specified number of days."""
+        user = self.get_user(user_id)
+        if not user:
+            return False
+        today = datetime.date.today()
+        try:
+            if user.get("expiry"):
+                current_exp = datetime.datetime.strptime(user["expiry"], "%Y-%m-%d").date()
+                base_date = max(today, current_exp)
+            else:
+                base_date = today
+        except Exception:
+            base_date = today
+
+        new_exp = base_date + datetime.timedelta(days=days)
+        new_exp_str = new_exp.strftime("%Y-%m-%d")
+        res = self._request(
+            f"users/{urllib.parse.quote(user_id)}",
+            method="PATCH",
+            data={"expiry": new_exp_str}
+        )
+        return bool(res.get("ok"))
+
