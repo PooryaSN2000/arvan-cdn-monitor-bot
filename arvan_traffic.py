@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-ArvanCloud CDN Monitor & Reporter CLI (نسخه پیشرفته ۳.۰)
-ابزار جامع خط فرمان برای مانیتورینگ مصرف ترافیک، بررسی سقف ۸ گیگ، پیش‌بینی اتمام (ETA)،
-مدیریت ابر DNS و تولید اینفوگرافیک‌ها
+ArvanCloud CDN Monitor & Reporter CLI (Advanced v3.0)
+Comprehensive CLI utility for monitoring traffic usage, 8GB quota limits, burn rate / ETA predictions,
+DNS edge proxy management, and infographic chart generation.
 """
 
 import sys
@@ -23,7 +23,7 @@ from arvan_api import (
 
 
 def render_ascii_table(headers: List[str], rows: List[List[str]], alignments: Optional[List[str]] = None) -> str:
-    """رسم جدول خطی مرتب در ترمینال"""
+    """Render a clean aligned ASCII table in terminal."""
     if not rows:
         return "داده‌ای برای نمایش وجود ندارد."
 

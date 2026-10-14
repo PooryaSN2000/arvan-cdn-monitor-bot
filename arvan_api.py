@@ -1,6 +1,6 @@
 """
 ArvanCloud CDN API Client & Advanced Analytics Engine
-ماژول هسته برای اتصال به API ابر آروان، محاسبات پیش‌بینانه، نمودارهای تحلیلی و مدیریت DNS
+Core module for ArvanCloud API integration, predictive analytics, analytical charts, and DNS management.
 """
 
 import os
@@ -48,7 +48,7 @@ TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 
 
 def format_bytes(size_bytes: Optional[int]) -> str:
-    """تبدیل بایت به فرمت‌های خوانا مانند MB, GB, TB"""
+    """Convert bytes to human-readable units such as MB, GB, TB."""
     if size_bytes is None:
         return "N/A"
     try:
@@ -67,7 +67,7 @@ def format_bytes(size_bytes: Optional[int]) -> str:
 
 
 def format_number(val: Optional[int]) -> str:
-    """فرمت‌بندی تعداد با جداکننده کاما"""
+    """Format integers with thousands comma separator."""
     if val is None:
         return "0"
     try:
@@ -77,7 +77,7 @@ def format_number(val: Optional[int]) -> str:
 
 
 def generate_progress_bar(percentage: float, length: int = 12) -> str:
-    """رسم نوار پیشرفت متنی"""
+    """Render a text-based ASCII progress bar."""
     capped_pct = max(0.0, min(100.0, percentage))
     filled_len = int(round(length * capped_pct / 100.0))
     bar = "█" * filled_len + "░" * (length - filled_len)
@@ -128,10 +128,10 @@ class ArvanCDNClient:
                 msg = err_body
             raise RuntimeError(f"HTTP {e.code}: {msg}")
         except urllib.error.URLError as e:
-            raise RuntimeError(f"خطای ارتباط با سرور آروان: {e.reason}")
+            raise RuntimeError(f"Network error connecting to ArvanCloud: {e.reason}")
 
     def get_domains(self) -> List[str]:
-        """دریافت نام تمام دامنه‌ها با صفحه‌بندی کامل"""
+        """Fetch all registered domain names with complete pagination."""
         domains: List[str] = []
         page = 1
         per_page = 50
@@ -156,7 +156,7 @@ class ArvanCDNClient:
         return sorted(list(set(domains)))
 
     def get_traffic_report(self, domain: str, period: str = "24h") -> Dict[str, Any]:
-        """دریافت گزارش تفکیکی ترافیک و درخواست‌ها"""
+        """Retrieve detailed traffic and request breakdown for a domain."""
         try:
             res = self._request(f"domains/{domain}/reports/traffics", params={"period": period})
         except Exception as e:
@@ -220,7 +220,7 @@ class ArvanCDNClient:
         return results
 
     def check_8gb_limits(self, limit_gb: float = 8.0, domains: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """بررسی وضعیت مصرف در برابر سقف رایگان ۲۴ ساعته"""
+        """Check 24-hour bypass usage against the free quota limit (default: 8.0 GB)."""
         if domains is None:
             domains = self.get_domains()
 
@@ -280,11 +280,11 @@ class ArvanCDNClient:
 
         return status_list
 
-    # ==================== ۱. محاسبات پیش‌بینانه و نرخ مصرف (Burn Rate & ETA) ====================
+    # ==================== 1. Predictive Analytics & Burn Rate (ETA) ====================
 
     def calculate_burn_rate_and_eta(self, domain: str, limit_gb: float = 8.0) -> Dict[str, Any]:
         """
-        محاسبه سرعت مصرف فعلی (بر اساس ۳ ساعت گذشته) و تخمین زمان دقیق اتمام سقف ۸ گیگابایت
+        Calculate current consumption speed (based on last 3 hours) and estimate time to 8 GB exhaustion.
         """
         rep_24h = self.get_traffic_report(domain, period="24h")
         rep_3h = self.get_traffic_report(domain, period="3h")
@@ -293,7 +293,7 @@ class ArvanCDNClient:
         byp_24h = rep_24h.get("bypass_bytes", 0)
         byp_3h = rep_3h.get("bypass_bytes", 0)
 
-        # محاسبه سرعت مصرف در هر ساعت (بر اساس میانگین ۳ ساعت اخیر)
+        # Calculate hourly consumption rate (based on average of last 3 hours)
         hourly_rate_bytes = byp_3h / 3.0
         remaining_bytes = max(0, limit_bytes - byp_24h)
 
@@ -305,7 +305,7 @@ class ArvanCDNClient:
             eta_hours = 0.0
             eta_time_str = "هم‌اکنون تمام شده است! 🚨"
             urgency = "danger"
-        elif hourly_rate_bytes > 5 * 1024 * 1024:  # بیشتر از ۵ مگابایت در ساعت
+        elif hourly_rate_bytes > 5 * 1024 * 1024:  # More than 5 MB per hour
             eta_hours = remaining_bytes / hourly_rate_bytes
             target_time = now_tehran + timedelta(hours=eta_hours)
             if eta_hours < 24:
@@ -334,7 +334,7 @@ class ArvanCDNClient:
 
     def detect_traffic_spike(self, domain: str) -> Optional[Dict[str, Any]]:
         """
-        تشخیص جهش ناگهانی ترافیک (Spike/DDoS) با مقایسه ساعت گذشته نسبت به میانگین ۲۴ ساعته
+        Detect anomalous traffic spike (Spike/DDoS) by comparing the latest hour to 24h baseline.
         """
         rep = self.get_traffic_report(domain, period="24h")
         charts = rep.get("charts", {})
@@ -350,12 +350,12 @@ class ArvanCDNClient:
         if not bypass_series or len(bypass_series) < 4:
             return None
 
-        # مقایسه داده‌های آخرین ساعت با میانگین ساعات قبلی
+        # Compare latest hour data against average of prior hours
         latest_hour_bytes = bypass_series[-1]
         previous_hours = bypass_series[:-1]
         avg_hourly_bytes = sum(previous_hours) / len(previous_hours) if previous_hours else 1
 
-        # اگر مصرف ساعت اخیر حداقل ۳ برابر میانگین قبلی باشد و بیش از ۱۵۰ مگابایت باشد
+        # If latest hour usage is at least 2.8x average and exceeds 150 MB
         if latest_hour_bytes >= (2.8 * avg_hourly_bytes) and latest_hour_bytes > (150 * 1024 * 1024):
             ratio = latest_hour_bytes / avg_hourly_bytes if avg_hourly_bytes > 0 else 0
             return {
@@ -368,7 +368,7 @@ class ArvanCDNClient:
         return None
 
     def calculate_overage_cost(self, bypass_bytes: int, limit_gb: float = 8.0, cost_per_gb_toman: int = 1500) -> Dict[str, Any]:
-        """محاسبه هزینه مالی ترافیک مازاد به تومان"""
+        """Calculate financial overage cost in Tomans."""
         limit_bytes = limit_gb * (1024 ** 3)
         overage_bytes = max(0, bypass_bytes - limit_bytes)
         overage_gb = overage_bytes / (1024 ** 3)
@@ -380,15 +380,15 @@ class ArvanCDNClient:
             "cost_readable": f"{cost_toman:,} تومان"
         }
 
-    # ==================== ۲. مدیریت رکوردهای DNS و سوییچ ابر روشن/خاموش ====================
+    # ==================== 2. DNS Record Management & Cloud Proxy Toggle ====================
 
     def get_dns_records(self, domain: str) -> List[Dict[str, Any]]:
-        """دریافت تمام رکوردهای DNS یک دامنه"""
+        """Fetch all DNS records for a given domain."""
         res = self._request(f"domains/{domain}/dns-records")
         return res.get("data", [])
 
     def toggle_dns_cloud(self, domain: str, record_id: str, cloud_status: bool) -> bool:
-        """تغییر وضعیت ابر روشن/خاموش (Cloud/Proxy) یک رکورد DNS"""
+        """Toggle ArvanCloud edge proxy status (Cloud on/off) for a DNS record."""
         payload = {"cloud": cloud_status}
         res = self._request(
             f"domains/{domain}/dns-records/{record_id}/cloud",
@@ -397,13 +397,13 @@ class ArvanCDNClient:
         )
         return bool(res.get("data") or res.get("status") is not False)
 
-    # ==================== ۳. ریشه‌یابی و منابع مصرف (IPهای پرمصرف / مناطق) ====================
+    # ==================== 3. Root-Cause Analysis & Traffic Sources (Top IPs / Geo) ====================
 
     def get_top_traffic_sources(self, domain: str, period: str = "24h") -> Dict[str, Any]:
         """
-        استخراج منابع اصلی ترافیک (IPهای پرمصرف در صورت دسترسی پلن، یا مناطق جغرافیایی پرمصرف)
+        Extract primary traffic sources (high-request IPs if supported by plan, or geographic regions).
         """
-        # ۱. تلاش برای دریافت لیست IPها (نیاز به پلن حرفه‌ای/سازمانی در آروان)
+        # 1. Attempt to fetch IP list (available on Pro/Enterprise plans)
         try:
             res_ips = self._request(f"domains/{domain}/reports/high-request-ips", params={"period": period})
             ips = res_ips.get("data", [])
@@ -412,7 +412,7 @@ class ArvanCDNClient:
         except Exception:
             pass
 
-        # ۲. در پلن Basic آروان: دریافت لیست مناطق و کشورهای پرمصرف
+        # 2. On Basic plan: fetch top geographic regions and countries
         try:
             res_map = self._request(f"domains/{domain}/reports/traffics/map", params={"period": period})
             lists = res_map.get("data", {}).get("lists", [])
@@ -420,10 +420,10 @@ class ArvanCDNClient:
         except Exception as e:
             return {"type": "error", "error": str(e), "data": []}
 
-    # ==================== ۴. تولید نمودارها و اینفوگرافیک‌ها ====================
+    # ==================== 4. Visualization & Infographic Generation ====================
 
     def generate_chart_image(self, domain: str, period: str = "24h", output_file: Optional[str] = None) -> bytes:
-        """تولید نمودار خطی تحلیلی ترافیک و درخواست‌ها"""
+        """Generate 2-panel analytical timeline chart of traffic and requests."""
         rep = self.get_traffic_report(domain, period=period)
         if rep.get("error"):
             raise ValueError(f"نمی‌توان نمودار را رسم کرد: {rep['error']}")
@@ -500,7 +500,7 @@ class ArvanCDNClient:
 
     def generate_pie_chart_image(self, domains: Optional[List[str]] = None, output_file: Optional[str] = None) -> bytes:
         """
-        تولید نمودار دونات شیک (Donut Chart) از سهم هر دامنه در مصرف ترافیک ۲۴ ساعت گذشته
+        Generate a donut chart showing the 24-hour bypass traffic distribution among domains.
         """
         if domains is None:
             domains = self.get_domains()
@@ -545,7 +545,7 @@ class ArvanCDNClient:
 
         ax.set_title("ArvanCloud CDN - 24h Bypass Traffic Share", fontsize=14, fontweight='bold', color='#cdd6f4', pad=20)
 
-        # متن مرکز دونات
+        # Center donut label
         ax.text(0, 0, f"Total\n{format_bytes(sum(domain_traffic.values()))}",
                 ha='center', va='center', fontsize=12, fontweight='bold', color='#cdd6f4')
 
@@ -562,7 +562,7 @@ class ArvanCDNClient:
 
     def generate_daily_digest_card(self, domains: Optional[List[str]] = None, limit_gb: float = 8.0, output_file: Optional[str] = None) -> bytes:
         """
-        تولید یک پوستر گرافیکی مدرن (Daily Digest Infographic Card) از خلاصه وضعیت تمام دامنه‌ها
+        Generate a modern daily digest infographic card summarizing traffic and quotas across all domains.
         """
         if domains is None:
             domains = self.get_domains()
@@ -580,15 +580,15 @@ class ArvanCDNClient:
         bar_colors = []
         for it in limit_items:
             if it["is_exceeded"]:
-                bar_colors.append('#f38ba8')  # قرمز
+                bar_colors.append('#f38ba8')  # Red
             elif it["is_warning"]:
-                bar_colors.append('#fab387')  # نارنجی
+                bar_colors.append('#fab387')  # Orange
             else:
-                bar_colors.append('#a6e3a1')  # سبز
+                bar_colors.append('#a6e3a1')  # Green
 
-        # رسم نوار پیش‌زمینه (سقف ۱۰۰٪)
+        # Background quota bar (100% capacity)
         ax.barh(y_positions, [100] * len(limit_items), height=0.45, color='#313244', alpha=0.5)
-        # رسم نوار مقدار مصرف
+        # Usage bar
         bars = ax.barh(y_positions, percentages, height=0.45, color=bar_colors)
 
         ax.set_yticks(y_positions)
@@ -598,14 +598,14 @@ class ArvanCDNClient:
         ax.set_title("ArvanCloud CDN - Daily Traffic Digest Card", fontsize=15, fontweight='bold', color='#cdd6f4', pad=18)
         ax.grid(axis='x', linestyle='--', alpha=0.25, color='#585b70')
 
-        # افزودن برچسب‌های متنی روی میله‌ها
+        # Add data labels on bars
         for idx, (bar, item) in enumerate(zip(bars, limit_items)):
             width = bar.get_width()
             val_text = f"{format_bytes(item['bypass_bytes'])} ({item['percent_used']:.1f}%)"
             ax.text(width + 2, bar.get_y() + bar.get_height() / 2, val_text,
                     va='center', ha='left', fontsize=10, fontweight='bold', color='#cdd6f4')
 
-        # خلاصه در زیر نمودار
+        # Summary footer under the chart
         tot_bypass = sum(it["bypass_bytes"] for it in limit_items)
         now_str = datetime.datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d %H:%M")
         fig.text(0.12, 0.03, f"Date: {now_str} (Tehran) | Total Account Bypass: {format_bytes(tot_bypass)}",

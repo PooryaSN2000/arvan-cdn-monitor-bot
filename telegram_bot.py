@@ -110,7 +110,7 @@ is_token_valid = bool(bot_token and bot_token != "YOUR_TELEGRAM_BOT_TOKEN" and "
 bot = telebot.TeleBot(bot_token if is_token_valid else "000000000:AAEBdummyTokenPlaceholderXXXXXXXXX", parse_mode="HTML")
 
 
-# ==================== دکوراتور احراز هویت ادمین ====================
+# ==================== Admin Authentication Decorator ====================
 
 def admin_only(func):
     @wraps(func)
@@ -176,7 +176,7 @@ def get_main_keyboard():
     return markup
 
 
-# ==================== تولید گزارش وضعیت ====================
+# ==================== Status Report Generator ====================
 
 def format_status_message(client: ArvanCDNClient, limit_gb: float, cost_per_gb: int) -> str:
     limit_items = client.check_8gb_limits(limit_gb=limit_gb)
@@ -239,7 +239,7 @@ def format_status_message(client: ArvanCDNClient, limit_gb: float, cost_per_gb: 
     return "\n".join(lines)
 
 
-# ==================== هندلرهای پیام و فرامین ====================
+# ==================== Message & Command Handlers ====================
 
 @bot.message_handler(commands=['start', 'help'])
 @admin_only
@@ -275,7 +275,7 @@ def handle_status(message):
         bot.send_message(chat_id, f"❌ خطا در دریافت گزارش: {e}")
 
 
-# ==================== ۱. پیش‌بینی زمان اتمام سقف (ETA & Burn Rate) ====================
+# ==================== 1. Burn Rate & ETA Prediction ====================
 
 @bot.message_handler(func=lambda msg: msg.text in ["⏱ پیش‌بینی اتمام سقف (ETA)", "/eta"])
 @admin_only
@@ -312,7 +312,7 @@ def handle_eta(message):
         bot.send_message(chat_id, f"❌ خطا در تحلیل پیش‌بینی: {e}")
 
 
-# ==================== ۲. منوی اینفوگرافیک و نمودارها ====================
+# ==================== 2. Infographics & Charts Menu ====================
 
 @bot.message_handler(func=lambda msg: msg.text in ["🎨 اینفوگرافیک و نمودارها", "/charts"])
 @admin_only
@@ -413,7 +413,7 @@ def callback_generate_chart(call):
         bot.send_message(chat_id, f"❌ خطا در تولید نمودار: {e}")
 
 
-# ==================== ۳. سوییچ ابر روشن/خاموش (DNS Cloud Toggle) ====================
+# ==================== 3. ArvanCloud DNS Cloud/Proxy Switch ====================
 
 @bot.message_handler(func=lambda msg: msg.text in ["☁️ مدیریت ابر DNS (سوییچ)", "/dns"])
 @admin_only
@@ -437,7 +437,7 @@ def callback_dns_domain_records(call):
     bot.answer_callback_query(call.id, text="دریافت رکوردهای DNS...")
     try:
         records = arvan_client.get_dns_records(domain)
-        # فیلتر رکوردهای قابل اتصال به پروکسی (A, AAAA, CNAME)
+        # Filter proxyable records (A, AAAA, CNAME)
         proxyable_records = [r for r in records if r.get("type", "").lower() in ["a", "aaaa", "cname"]]
 
         if not proxyable_records:
@@ -485,7 +485,7 @@ def callback_toggle_cloud(call):
         bot.send_message(chat_id, f"❌ خطا در تغییر ابر DNS: {e}")
 
 
-# ==================== ۴. ریشه‌یابی و منابع پرمصرف (IP / Geo) ====================
+# ==================== 4. Root-Cause Analysis & Top Traffic Sources (IP / Geo) ====================
 
 @bot.message_handler(func=lambda msg: msg.text in ["🔍 منابع و ترافیک منطقه‌ای", "/sources"])
 @admin_only
@@ -537,7 +537,7 @@ def callback_sources_report(call):
         bot.send_message(chat_id, f"❌ خطا: {e}")
 
 
-# ==================== سایر منوها و دستورات ====================
+# ==================== Other Handlers & Administrative Commands ====================
 
 @bot.message_handler(func=lambda msg: msg.text in ["🌐 لیست دامنه‌ها", "/domains"])
 @admin_only
@@ -762,7 +762,7 @@ def handle_unknown_message(message):
     bot.reply_to(message, "دستور نامشخص است. لطفاً از دکمه‌های پایین صفحه استفاده کنید.", reply_markup=get_main_keyboard())
 
 
-# ==================== ترد مانیتورینگ هوشمند پس‌زمینه ====================
+# ==================== Background Intelligent Monitoring Thread ====================
 
 def background_monitor_worker():
     print("🚀 Background Monitor Worker started.")
@@ -782,7 +782,7 @@ def background_monitor_worker():
             if admin_ids:
                 limit_items = arvan_client.check_8gb_limits(limit_gb=limit_gb)
 
-                # ۱. تشخیص جهش ناگهانی (Spike Detection)
+                # 1. Anomaly Traffic Spike Detection
                 if spike_alert:
                     for item in limit_items:
                         domain = item["domain"]
@@ -800,8 +800,7 @@ def background_monitor_worker():
                                 except Exception as e:
                                     print(f"Error sending spike alert to {cid}: {e}")
 
-                # ۲. ارسال گزارش دوره‌ای جامع (شامل نوار پیشرفت، هشدارها و تخمین ETA تمام دامنه‌ها)
-                # در صورتی که گزارش دوره‌ای فعال باشد، تمام اطلاعات در همین یک پیام تجمیع می‌شود تا از ارسال پیام‌های اضافی و تکراری جلوگیری شود.
+                # 2. Consolidated Periodic Summary (Includes progress bars, status, warnings & ETA in one single message)
                 if send_summary:
                     summary_text = (
                         f"⏰ <b>گزارش دوره‌ای مانیتورینگ CDN</b> (هر {interval_min} دقیقه)\n\n" +
@@ -813,8 +812,30 @@ def background_monitor_worker():
                         except Exception as e:
                             print(f"Error sending summary to {cid}: {e}")
 
-                # ۳. اگر گزارش دوره‌ای غیرفعال باشد، اما auto_alert فعال باشد:
-                # فقط در صورت تغییر وضعیت دامنه (مثلاً ورود به آستانه هشدار یا عبور از سقف) پیام هشدار اختصاصی ارسال می‌شود.
+                    # Automatically send 24h traffic charts for domains nearing or exceeding quota (>= 75%)
+                    warning_items = [it for it in limit_items if it.get("is_warning") or it.get("is_exceeded")]
+                    for w_item in warning_items:
+                        w_dom = w_item["domain"]
+                        try:
+                            chart_bytes = arvan_client.generate_chart_image(w_dom, period="24h")
+                            pct = w_item.get("percent_used", 0.0)
+                            status_title = "عبور از سقف مجاز 🚨" if w_item.get("is_exceeded") else "در آستانه سقف (هشدار) ⚠️"
+                            caption = (
+                                f"📈 <b>نمودار مصرف ۲۴ ساعته:</b> <code>{w_dom}</code>\n"
+                                f"📊 وضعیت: <b>{status_title}</b>\n"
+                                f"📦 ترافیک Bypass مصرفی: <b>{format_bytes(w_item['bypass_bytes'])}</b> ({pct:.1f}%)\n"
+                                f"💡 بررسی روند ترافیک، کش و ریکوئست‌های مبدا در ۲۴ ساعت گذشته"
+                            )
+                            for cid in admin_ids:
+                                try:
+                                    bot.send_photo(cid, chart_bytes, caption=caption)
+                                except Exception as e:
+                                    print(f"Error sending chart for {w_dom} to {cid}: {e}")
+                        except Exception as e:
+                            print(f"Error generating 24h chart for warning domain {w_dom}: {e}")
+
+                # 3. If periodic summary is disabled but auto_alert is enabled:
+                # Send standalone alert only when a domain changes state (e.g. enters warning or exceeded)
                 elif auto_alert:
                     for item in limit_items:
                         domain = item["domain"]
@@ -844,7 +865,7 @@ def background_monitor_worker():
                                 except Exception as e:
                                     print(f"Error sending alert to {cid}: {e}")
 
-                # ثبت آخرین وضعیت دامنه‌ها جهت جلوگیری از هشدارهای تکراری
+                # Record current domain status to avoid duplicate notifications in subsequent cycles
                 for item in limit_items:
                     domain = item["domain"]
                     is_exceeded = item.get("is_exceeded", False)
