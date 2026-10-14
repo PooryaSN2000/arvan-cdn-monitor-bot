@@ -440,7 +440,7 @@ class ArvanCDNClient:
         for cat in categories:
             try:
                 dt = datetime.datetime.fromisoformat(cat.replace("Z", "+00:00"))
-                parsed_dates.append(dt)
+                parsed_dates.append(dt.astimezone(TEHRAN_TZ))
             except Exception:
                 parsed_dates.append(cat)
 
@@ -478,12 +478,12 @@ class ArvanCDNClient:
             ax2.plot(parsed_dates, vals_reqs, marker='s', markersize=3, label=label_map.get(key, raw_name), color=req_colors.get(key, "#f5e0dc"), linewidth=1.8)
 
         ax2.set_ylabel("Requests Count", fontsize=11, color='#cdd6f4')
-        ax2.set_xlabel("Time (UTC)", fontsize=11, color='#cdd6f4', labelpad=10)
+        ax2.set_xlabel("Time (Iran / Tehran - IRST)", fontsize=11, color='#cdd6f4', labelpad=10)
         ax2.grid(True, linestyle='--', alpha=0.3, color='#585b70')
         ax2.legend(loc="upper left", framealpha=0.8, facecolor="#313244", edgecolor="#45475a")
 
         if parsed_dates and isinstance(parsed_dates[0], datetime.datetime):
-            date_fmt = mdates.DateFormatter('%H:%M' if period in ["3h", "6h", "12h", "24h"] else '%b %d')
+            date_fmt = mdates.DateFormatter('%H:%M' if period in ["3h", "6h", "12h", "24h"] else '%b %d', tz=TEHRAN_TZ)
             ax2.xaxis.set_major_formatter(date_fmt)
             fig.autofmt_xdate(rotation=35)
 
