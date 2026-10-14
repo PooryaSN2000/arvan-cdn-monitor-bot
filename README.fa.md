@@ -86,30 +86,49 @@ python3 telegram_bot.py
 
 ---
 
-## ⚙️ ۳. استقرار دائمی ۲۴/۷ روی سرور (Daemon)
+## ⚙️ ۳. استقرار دائمی ۲۴/۷ روی سرور و به‌روزرسانی خودکار با گیت‌هاب
 
-برای اینکه ربات همواره در حال اجرا باشد و با ریبوت سرور خودکار روشن شود:
+برای اجرای پیوسته در پس‌زمینه و دریافت خودکار آخرین تغییرات سورس‌کد با هر کامیت در گیت‌هاب:
 
-### روش اول: استفاده از Systemd (توصیه شده روی لینوکس)
-فایل سرویس آماده در پروژه قرار دارد: [arvan-bot.service](arvan-bot.service)
+### روش اول: سرویس Systemd و تایمر به‌روزرسانی خودکار (توصیه شده روی لینوکس)
 
 ```bash
-# ۱. کپی فایل سرویس در مسیر سیستم
-sudo cp arvan-bot.service /etc/systemd/system/
+# ۱. کلون پروژه در دایرکتوری /opt سرور
+sudo git clone https://github.com/PooryaSN2000/arvan-cdn-monitor-bot.git /opt/arvan-cdn-monitor-bot
+cd /opt/arvan-cdn-monitor-bot
 
-# ۲. فعال‌سازی و استارت سرویس
+# ۲. ایجاد محیط ایزوله پایتون و نصب وابستگی‌ها
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+
+# ۳. تنظیم فایل کانفیگ (bot_config.json)
+cp bot_config.example.json bot_config.json
+nano bot_config.json
+
+# ۴. نصب سرویس ربات و تایمر به‌روزرسانی خودکار
+sudo cp arvan-bot.service /etc/systemd/system/arvan-cdn-bot.service
+sudo cp arvan-cdn-autoupdate.service /etc/systemd/system/arvan-cdn-autoupdate.service
+sudo cp arvan-cdn-autoupdate.timer /etc/systemd/system/arvan-cdn-autoupdate.timer
+
 sudo systemctl daemon-reload
-sudo systemctl enable --now arvan-bot
+sudo systemctl enable --now arvan-cdn-bot.service
+sudo systemctl enable --now arvan-cdn-autoupdate.timer
 
-# ۳. بررسی وضعیت سرویس
-sudo systemctl status arvan-bot
+# ۵. بررسی وضعیت زنده و لاگ‌ها
+sudo systemctl status arvan-cdn-bot.service
+journalctl -u arvan-cdn-bot.service -f
 ```
+
+#### 🔄 نحوه کارکرد به‌روزرسانی خودکار (CI/CD):
+تایمر `arvan-cdn-autoupdate.timer` هر ۱ دقیقه یک‌بار گیت‌هاب را بررسی می‌کند. به محض اینکه کامیت جدیدی روی شاخه `main` پوش کنید:
+1. سرور کامیت جدید را شناسایی می‌کند.
+2. آخرین تغییرات کد را دریافت (`git reset --hard origin/main`) می‌کند.
+3. در صورت تغییر کتابخانه‌ها در `requirements.txt`، آن‌ها را خودکار در محیط مجازی نصب می‌کند.
+4. سرویس `arvan-cdn-bot.service` را بدون کوچک‌ترین قطعی ری‌استارت می‌کند.
+5. فایل حساس `bot_config.json` کاملاً دست‌نخورده و ایمن باقی می‌ماند.
 
 ### روش دوم: استفاده از Docker Compose
 ```bash
 docker compose up -d
-```
-برای مشاهده لاگ‌ها:
-```bash
 docker compose logs -f
 ```

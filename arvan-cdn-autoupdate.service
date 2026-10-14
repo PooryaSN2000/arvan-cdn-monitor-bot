@@ -1,0 +1,7 @@
+[Unit]
+Description=ArvanCloud Bot Git Auto Update Checker
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/arvan-cdn-monitor-bot/auto_update.sh

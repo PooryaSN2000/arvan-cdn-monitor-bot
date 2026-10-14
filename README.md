@@ -145,25 +145,47 @@ python3 telegram_bot.py
 
 ---
 
-## ⚙️ 3. Deploying 24/7 as a Daemon
+## ⚙️ 3. Deploying 24/7 & Continuous Auto-Updates
 
-Keep the bot running continuously in the background with auto-restart on system boot.
+Keep the bot running continuously in the background with auto-restart on system boot and automatic deployment on every GitHub commit.
 
-### Option A: Linux Systemd Service (Recommended)
-A pre-configured service unit is provided in [arvan-bot.service](arvan-bot.service).
+### Option A: Linux Systemd Service & Auto-Updater (Recommended)
+Pre-configured systemd units are provided:
 
 ```bash
-# 1. Copy service file to systemd directory
-sudo cp arvan-bot.service /etc/systemd/system/
+# 1. Clone repository to /opt
+sudo git clone https://github.com/PooryaSN2000/arvan-cdn-monitor-bot.git /opt/arvan-cdn-monitor-bot
+cd /opt/arvan-cdn-monitor-bot
 
-# 2. Reload daemon and start service
+# 2. Setup virtual environment & dependencies
+python3 -m venv venv
+venv/bin/pip install -r requirements.txt
+
+# 3. Create your bot_config.json
+cp bot_config.example.json bot_config.json
+nano bot_config.json
+
+# 4. Install systemd service and auto-update timer
+sudo cp arvan-bot.service /etc/systemd/system/arvan-cdn-bot.service
+sudo cp arvan-cdn-autoupdate.service /etc/systemd/system/arvan-cdn-autoupdate.service
+sudo cp arvan-cdn-autoupdate.timer /etc/systemd/system/arvan-cdn-autoupdate.timer
+
 sudo systemctl daemon-reload
-sudo systemctl enable --now arvan-bot
+sudo systemctl enable --now arvan-cdn-bot.service
+sudo systemctl enable --now arvan-cdn-autoupdate.timer
 
-# 3. Check live status and logs
-sudo systemctl status arvan-bot
-journalctl -u arvan-bot -f
+# 5. Check live status and logs
+sudo systemctl status arvan-cdn-bot.service
+journalctl -u arvan-cdn-bot.service -f
 ```
+
+#### 🔄 Automatic Updates on GitHub Push
+With `arvan-cdn-autoupdate.timer` enabled, the server checks GitHub every minute. When you push any new commit to `main`, the server automatically:
+1. Detects new commits (`git fetch`)
+2. Pulls changes (`git reset --hard origin/main`)
+3. Installs any updated dependencies (`pip install -r requirements.txt`)
+4. Restarts `arvan-cdn-bot.service`
+5. Leaves your sensitive `bot_config.json` completely untouched!
 
 ### Option B: Docker Compose
 ```bash

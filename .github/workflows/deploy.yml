@@ -1,0 +1,30 @@
+name: Deploy Bot to Server
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Trigger Server Update (Optional SSH Dispatch)
+        if: env.SSH_HOST != ''
+        env:
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+        run: |
+          if [ -n "$SSH_HOST" ] && [ -n "$SSH_KEY" ]; then
+            echo "Connecting to server to trigger instant deployment..."
+            mkdir -p ~/.ssh
+            echo "$SSH_KEY" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" "/opt/arvan-cdn-monitor-bot/auto_update.sh"
+            echo "Instant deployment triggered successfully."
+          else
+            echo "Note: Server-side systemd timer automatically checks and updates within 1 minute."
+          fi

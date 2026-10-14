@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=pooryasn
-WorkingDirectory=/run/media/pooryasn/Personal/Code Projects/apicdnusage
-ExecStart=/usr/bin/python3 "/run/media/pooryasn/Personal/Code Projects/apicdnusage/telegram_bot.py"
+User=root
+WorkingDirectory=/opt/arvan-cdn-monitor-bot
+ExecStart=/opt/arvan-cdn-monitor-bot/venv/bin/python telegram_bot.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1

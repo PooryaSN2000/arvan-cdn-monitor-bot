@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ArvanCloud Bot Auto Update every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=arvan-cdn-autoupdate.service
+
+[Install]
+WantedBy=timers.target
