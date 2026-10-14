@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  arvan-cdn-bot:
+    build: .
+    container_name: arvan_cdn_bot
+    restart: always
+    volumes:
+      - ./bot_config.json:/app/bot_config.json
+    environment:
+      - PYTHONUNBUFFERED=1

@@ -1,0 +1,15 @@
+[Unit]
+Description=ArvanCloud CDN Monitor Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=pooryasn
+WorkingDirectory=/run/media/pooryasn/Personal/Code Projects/apicdnusage
+ExecStart=/usr/bin/python3 "/run/media/pooryasn/Personal/Code Projects/apicdnusage/telegram_bot.py"
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
