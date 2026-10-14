@@ -222,11 +222,18 @@ def format_status_message(client: ArvanCDNClient, limit_gb: float, cost_per_gb: 
         for it in exceeded:
             cost_info = client.calculate_overage_cost(it["bypass_bytes"], limit_gb=limit_gb, cost_per_gb_toman=cost_per_gb)
             lines.append(f"  ⚠️ <b>{it['domain']}</b>: {it['bypass_gb']:.2f} GB (هزینه مازاد: <b>{cost_info['cost_readable']}</b>)")
-    elif warnings:
+
+    if warnings:
         lines.append("\n⚠️ <b>دامنه‌های در آستانه سقف (بالای ۷۵٪):</b>")
         for it in warnings:
-            lines.append(f"  🔸 <b>{it['domain']}</b>: {it['bypass_gb']:.2f} GB ({it['percent_used']:.1f}%)")
-    else:
+            try:
+                eta_info = client.calculate_burn_rate_and_eta(it["domain"], limit_gb=limit_gb)
+                eta_str = f" | ⏳ {eta_info['eta_time_str']}" if eta_info.get("eta_time_str") else ""
+            except Exception:
+                eta_str = ""
+            lines.append(f"  🔸 <b>{it['domain']}</b>: {it['bypass_gb']:.2f} GB ({it['percent_used']:.1f}%){eta_str}")
+
+    if not exceeded and not warnings:
         lines.append("\n✅ تمامی دامنه‌ها در محدوده امن قرار دارند.")
 
     return "\n".join(lines)
@@ -622,7 +629,8 @@ def handle_settings(message):
         "• <code>/setcost 1500</code> - تنظیم تعرفه هر گیگ به تومان\n"
         "• <code>/interval 30</code> - تنظیم فاصله بررسی (دقیقه)\n"
         "• <code>/toggle_alert</code> - روشن/خاموش کردن هشدار سقف\n"
-        "• <code>/toggle_spike</code> - روشن/خاموش کردن هشدار جهش ناگهانی"
+        "• <code>/toggle_spike</code> - روشن/خاموش کردن هشدار جهش ناگهانی\n"
+        "• <code>/toggle_summary</code> - روشن/خاموش کردن گزارش دوره‌ای"
     )
     bot.send_message(chat_id, text, reply_markup=get_main_keyboard())
 
@@ -739,6 +747,15 @@ def handle_toggle_spike(message):
     bot.reply_to(message, f"وضعیت هشدار جهش ترافیک: {st}")
 
 
+@bot.message_handler(commands=['toggle_summary'])
+@admin_only
+def handle_toggle_summary(message):
+    config["send_periodic_summary"] = not config.get("send_periodic_summary", True)
+    save_config(config)
+    st = "فعال ✅" if config["send_periodic_summary"] else "غیرفعال ❌"
+    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای (هر {config.get('check_interval_minutes', 30)} دقیقه): {st}")
+
+
 @bot.message_handler(func=lambda message: True)
 @admin_only
 def handle_unknown_message(message):
@@ -765,37 +782,10 @@ def background_monitor_worker():
             if admin_ids:
                 limit_items = arvan_client.check_8gb_limits(limit_gb=limit_gb)
 
-                for item in limit_items:
-                    domain = item["domain"]
-                    pct = item.get("percent_used", 0.0)
-                    is_exceeded = item.get("is_exceeded", False)
-                    is_warning = item.get("is_warning", False)
-
-                    prev_state = last_alert_status.get(domain, "safe")
-                    curr_state = "exceeded" if is_exceeded else ("warning" if is_warning else "safe")
-
-                    # ۱. هشدار عبور از سقف یا نزدیک شدن به آن
-                    if auto_alert and (is_exceeded or is_warning):
-                        eta_info = arvan_client.calculate_burn_rate_and_eta(domain, limit_gb=limit_gb)
-                        cost_info = arvan_client.calculate_overage_cost(item["bypass_bytes"], limit_gb=limit_gb, cost_per_gb_toman=cost_gb)
-
-                        alert_msg = (
-                            f"{item['status_emoji']} <b>هشدار مصرف سقف CDN ابر آروان!</b>\n\n"
-                            f"🌐 دامنه: <code>{domain}</code>\n"
-                            f"📦 ترافیک Bypass: <b>{format_bytes(item['bypass_bytes'])}</b> ({pct:.1f}%)\n"
-                            f"⏳ <b>تخمین اتمام:</b> {eta_info['eta_time_str']}\n"
-                        )
-                        if is_exceeded:
-                            alert_msg += f"🚨 <b>مصرف مازاد:</b> {cost_info['cost_readable']}\n"
-
-                        for cid in admin_ids:
-                            try:
-                                bot.send_message(cid, alert_msg)
-                            except Exception as e:
-                                print(f"Error sending alert to {cid}: {e}")
-
-                    # ۲. تشخیص جهش ناگهانی (Spike Detection)
-                    if spike_alert:
+                # ۱. تشخیص جهش ناگهانی (Spike Detection)
+                if spike_alert:
+                    for item in limit_items:
+                        domain = item["domain"]
                         spike = arvan_client.detect_traffic_spike(domain)
                         if spike:
                             spike_msg = (
@@ -810,9 +800,8 @@ def background_monitor_worker():
                                 except Exception as e:
                                     print(f"Error sending spike alert to {cid}: {e}")
 
-                    last_alert_status[domain] = curr_state
-
-                # ۳. ارسال خلاصه دوره‌ای وضعیت
+                # ۲. ارسال گزارش دوره‌ای جامع (شامل نوار پیشرفت، هشدارها و تخمین ETA تمام دامنه‌ها)
+                # در صورتی که گزارش دوره‌ای فعال باشد، تمام اطلاعات در همین یک پیام تجمیع می‌شود تا از ارسال پیام‌های اضافی و تکراری جلوگیری شود.
                 if send_summary:
                     summary_text = (
                         f"⏰ <b>گزارش دوره‌ای مانیتورینگ CDN</b> (هر {interval_min} دقیقه)\n\n" +
@@ -823,6 +812,44 @@ def background_monitor_worker():
                             bot.send_message(cid, summary_text)
                         except Exception as e:
                             print(f"Error sending summary to {cid}: {e}")
+
+                # ۳. اگر گزارش دوره‌ای غیرفعال باشد، اما auto_alert فعال باشد:
+                # فقط در صورت تغییر وضعیت دامنه (مثلاً ورود به آستانه هشدار یا عبور از سقف) پیام هشدار اختصاصی ارسال می‌شود.
+                elif auto_alert:
+                    for item in limit_items:
+                        domain = item["domain"]
+                        pct = item.get("percent_used", 0.0)
+                        is_exceeded = item.get("is_exceeded", False)
+                        is_warning = item.get("is_warning", False)
+
+                        prev_state = last_alert_status.get(domain, "safe")
+                        curr_state = "exceeded" if is_exceeded else ("warning" if is_warning else "safe")
+
+                        if (is_exceeded or is_warning) and curr_state != prev_state:
+                            eta_info = arvan_client.calculate_burn_rate_and_eta(domain, limit_gb=limit_gb)
+                            cost_info = arvan_client.calculate_overage_cost(item["bypass_bytes"], limit_gb=limit_gb, cost_per_gb_toman=cost_gb)
+
+                            alert_msg = (
+                                f"{item['status_emoji']} <b>هشدار مصرف سقف CDN ابر آروان!</b>\n\n"
+                                f"🌐 دامنه: <code>{domain}</code>\n"
+                                f"📦 ترافیک Bypass: <b>{format_bytes(item['bypass_bytes'])}</b> ({pct:.1f}%)\n"
+                                f"⏳ <b>تخمین اتمام:</b> {eta_info['eta_time_str']}\n"
+                            )
+                            if is_exceeded:
+                                alert_msg += f"🚨 <b>مصرف مازاد:</b> {cost_info['cost_readable']}\n"
+
+                            for cid in admin_ids:
+                                try:
+                                    bot.send_message(cid, alert_msg)
+                                except Exception as e:
+                                    print(f"Error sending alert to {cid}: {e}")
+
+                # ثبت آخرین وضعیت دامنه‌ها جهت جلوگیری از هشدارهای تکراری
+                for item in limit_items:
+                    domain = item["domain"]
+                    is_exceeded = item.get("is_exceeded", False)
+                    is_warning = item.get("is_warning", False)
+                    last_alert_status[domain] = "exceeded" if is_exceeded else ("warning" if is_warning else "safe")
 
         except Exception as e:
             print(f"Error in background monitor: {e}")
