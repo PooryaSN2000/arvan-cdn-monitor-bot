@@ -70,7 +70,7 @@ python3 arvan_traffic.py --detailed
   "admin_chat_ids": [123456789],
   "arvan_api_key": "YOUR_ARVAN_API_KEY",
   "limit_gb": 8.0,
-  "cost_per_gb_toman": 450,
+  "cost_per_gb_toman": 1500,
   "check_interval_minutes": 30,
   "auto_alert_enabled": true,
   "alert_threshold_percent": 75.0,

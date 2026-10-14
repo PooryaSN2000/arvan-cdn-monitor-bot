@@ -39,7 +39,7 @@ DEFAULT_CONFIG = {
     "admin_chat_ids": [],
     "arvan_api_key": os.getenv("ARVAN_API_KEY", DEFAULT_API_KEY),
     "limit_gb": 8.0,
-    "cost_per_gb_toman": 450,
+    "cost_per_gb_toman": 1500,
     "check_interval_minutes": 30,
     "auto_alert_enabled": True,
     "alert_threshold_percent": 75.0,
@@ -261,7 +261,7 @@ def handle_status(message):
         report = format_status_message(
             arvan_client,
             config.get("limit_gb", 8.0),
-            config.get("cost_per_gb_toman", 450)
+            config.get("cost_per_gb_toman", 1500)
         )
         bot.send_message(chat_id, report, reply_markup=get_main_keyboard())
     except Exception as e:
@@ -278,7 +278,7 @@ def handle_eta(message):
     try:
         domains = arvan_client.get_domains()
         limit_gb = config.get("limit_gb", 8.0)
-        cost_gb = config.get("cost_per_gb_toman", 450)
+        cost_gb = config.get("cost_per_gb_toman", 1500)
 
         lines = [
             "⏱ <b>تحلیل نرخ مصرف لحظه‌ای و پیش‌بینی زمان اتمام سقف:</b>",
@@ -598,7 +598,7 @@ def handle_settings(message):
     admins = get_admin_ids()
     interval = config.get("check_interval_minutes", 30)
     limit = config.get("limit_gb", 8.0)
-    cost = config.get("cost_per_gb_toman", 450)
+    cost = config.get("cost_per_gb_toman", 1500)
     auto_alert = "فعال ✅" if config.get("auto_alert_enabled", True) else "غیرفعال ❌"
     spike_alert = "فعال ✅" if config.get("spike_alert_enabled", True) else "غیرفعال ❌"
     summary = "فعال ✅" if config.get("send_periodic_summary", True) else "غیرفعال ❌"
@@ -619,7 +619,7 @@ def handle_settings(message):
         "• <code>/deladmin 123456789</code> - حذف ادمین\n"
         "• <code>/admins</code> - مشاهده لیست ادمین‌ها\n"
         "• <code>/setlimit 8.0</code> - تغییر سقف مجاز (گیگابایت)\n"
-        "• <code>/setcost 450</code> - تنظیم تعرفه هر گیگ به تومان\n"
+        "• <code>/setcost 1500</code> - تنظیم تعرفه هر گیگ به تومان\n"
         "• <code>/interval 30</code> - تنظیم فاصله بررسی (دقیقه)\n"
         "• <code>/toggle_alert</code> - روشن/خاموش کردن هشدار سقف\n"
         "• <code>/toggle_spike</code> - روشن/خاموش کردن هشدار جهش ناگهانی"
@@ -702,7 +702,7 @@ def handle_setcost(message):
         save_config(config)
         bot.reply_to(message, f"✅ تعرفه هر گیگابایت مازاد روی {val:,} تومان تنظیم شد.")
     except Exception:
-        bot.reply_to(message, "فرمت دستور: <code>/setcost 450</code>")
+        bot.reply_to(message, "فرمت دستور: <code>/setcost 1500</code>")
 
 
 @bot.message_handler(commands=['interval'])
@@ -757,7 +757,7 @@ def background_monitor_worker():
             interval_min = cfg.get("check_interval_minutes", 30)
             admin_ids = get_admin_ids()
             limit_gb = cfg.get("limit_gb", 8.0)
-            cost_gb = cfg.get("cost_per_gb_toman", 450)
+            cost_gb = cfg.get("cost_per_gb_toman", 1500)
             auto_alert = cfg.get("auto_alert_enabled", True)
             spike_alert = cfg.get("spike_alert_enabled", True)
             send_summary = cfg.get("send_periodic_summary", True)

@@ -367,7 +367,7 @@ class ArvanCDNClient:
             }
         return None
 
-    def calculate_overage_cost(self, bypass_bytes: int, limit_gb: float = 8.0, cost_per_gb_toman: int = 450) -> Dict[str, Any]:
+    def calculate_overage_cost(self, bypass_bytes: int, limit_gb: float = 8.0, cost_per_gb_toman: int = 1500) -> Dict[str, Any]:
         """محاسبه هزینه مالی ترافیک مازاد به تومان"""
         limit_bytes = limit_gb * (1024 ** 3)
         overage_bytes = max(0, bypass_bytes - limit_bytes)
