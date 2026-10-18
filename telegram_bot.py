@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
     "alert_threshold_percent": 75.0,
     "send_periodic_summary": True,
     "spike_alert_enabled": True,
+    "send_vpn_periodic_online": True,
     "nova_api_url": os.getenv("NOVA_API_URL", ""),
     "nova_api_key": os.getenv("NOVA_API_KEY", "")
 }
@@ -259,6 +260,40 @@ def format_status_message(client: ArvanCDNClient, limit_gb: float, cost_per_gb: 
 
     if not exceeded and not warnings:
         lines.append("\n✅ تمامی دامنه‌ها در محدوده امن قرار دارند.")
+
+    return "\n".join(lines)
+
+
+def format_vpn_online_message(client: Any, interval_min: int = 30) -> str:
+    """Format a clean periodic summary message of live online VPN users."""
+    summary = client.get_online_summary()
+    users = summary.get("users", [])
+    total_online = summary.get("total_online_users", len(users))
+    total_devices = summary.get("total_devices", sum(u.get("devices", 0) for u in users))
+
+    lines = [
+        f"⏰ <b>گزارش دوره‌ای کاربران آنلاین VPN</b> (هر {interval_min} دقیقه)\n",
+        f"⚡️ <b>تعداد کاربران متصل:</b> {total_online} نفر | <b>کل دستگاه‌های فعال:</b> {total_devices} دستگاه\n"
+    ]
+
+    if not users:
+        lines.append("⚪️ هم‌اکنون هیچ کاربری آنلاین نیست (تعداد دستگاه‌های فعال: ۰).")
+    else:
+        for u in users:
+            uid = u.get("id", "")
+            name = u.get("name", uid)
+            devs = u.get("devices", 0)
+            used_b = u.get("used_bytes", 0)
+            quota_b = u.get("quota_bytes", 0)
+            pct = (used_b / quota_b * 100.0) if quota_b > 0 else 0.0
+            bar = generate_progress_bar(pct, length=10)
+            status_dot = "🟢" if u.get("enabled", True) else "🔴"
+
+            lines.append(
+                f"{status_dot} 👤 <b>{name}</b> ({devs} دستگاه 📱)\n"
+                f"  • مصرف حجم: <b>{format_bytes(used_b)}</b> از {format_bytes(quota_b)} ({pct:.1f}%)\n"
+                f"  • پیشرفت: <code>[{bar}]</code>\n"
+            )
 
     return "\n".join(lines)
 
@@ -633,9 +668,19 @@ def handle_settings(message):
     auto_alert = "فعال ✅" if config.get("auto_alert_enabled", True) else "غیرفعال ❌"
     spike_alert = "فعال ✅" if config.get("spike_alert_enabled", True) else "غیرفعال ❌"
     summary = "فعال ✅" if config.get("send_periodic_summary", True) else "غیرفعال ❌"
+    vpn_online_summary = "فعال ✅" if config.get("send_vpn_periodic_online", True) else "غیرفعال ❌"
     nova_status = "متصل و فعال ✅" if get_nova_client() is not None else "غیرفعال (تنظیم نشده) ⚪️"
 
     admins_str = ", ".join(f"<code>{a}</code>" for a in admins) if admins else "تنظیم نشده"
+
+    vpn_info = ""
+    vpn_cmd = ""
+    if get_nova_client() is not None:
+        vpn_info = (
+            f"🛡 <b>پنل VPN (Nova):</b> {nova_status}\n"
+            f"📡 <b>ارسال دوره‌ای آنلاین‌های VPN:</b> {vpn_online_summary}\n"
+        )
+        vpn_cmd = "• <code>/toggle_vpn_online</code> - روشن/خاموش کردن گزارش دوره‌ای آنلاین‌های VPN\n"
 
     text = (
         "⚙️ <b>تنظیمات پیشرفته سامانه مانیتورینگ:</b>\n\n"
@@ -645,8 +690,8 @@ def handle_settings(message):
         f"💰 <b>تعرفه هر گیگ مازاد:</b> {cost} تومان\n"
         f"🔔 <b>هشدار عبور از سقف:</b> {auto_alert}\n"
         f"⚡️ <b>تشخیص جهش ناگهانی (Spike):</b> {spike_alert}\n"
-        f"📋 <b>ارسال خلاصه وضعیت دوره‌ای:</b> {summary}\n"
-        f"🛡 <b>پنل VPN (Nova):</b> {nova_status}\n\n"
+        f"📋 <b>ارسال خلاصه وضعیت دوره‌ای CDN:</b> {summary}\n"
+        f"{vpn_info}\n"
         "<b>دستورات مدیریتی ادمین:</b>\n"
         "• <code>/addadmin 123456789</code> - اضافه کردن ادمین\n"
         "• <code>/deladmin 123456789</code> - حذف ادمین\n"
@@ -656,9 +701,14 @@ def handle_settings(message):
         "• <code>/interval 30</code> - تنظیم فاصله بررسی (دقیقه)\n"
         "• <code>/toggle_alert</code> - روشن/خاموش کردن هشدار سقف\n"
         "• <code>/toggle_spike</code> - روشن/خاموش کردن هشدار جهش ناگهانی\n"
-        "• <code>/toggle_summary</code> - روشن/خاموش کردن گزارش دوره‌ای"
+        "• <code>/toggle_summary</code> - روشن/خاموش کردن گزارش دوره‌ای CDN\n"
+        f"{vpn_cmd}"
     )
-    bot.send_message(chat_id, text, reply_markup=get_main_keyboard())
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if get_nova_client() is not None:
+        markup.add(types.InlineKeyboardButton(f"📡 سوییچ گزارش دوره‌ای آنلاین‌های VPN ({vpn_online_summary})", callback_data="set_toggle:vpn_online"))
+    markup.add(types.InlineKeyboardButton(f"📋 سوییچ گزارش دوره‌ای CDN ({summary})", callback_data="set_toggle:summary"))
+    bot.send_message(chat_id, text, reply_markup=markup)
 
 
 @bot.message_handler(commands=['admins'])
@@ -779,7 +829,39 @@ def handle_toggle_summary(message):
     config["send_periodic_summary"] = not config.get("send_periodic_summary", True)
     save_config(config)
     st = "فعال ✅" if config["send_periodic_summary"] else "غیرفعال ❌"
-    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای (هر {config.get('check_interval_minutes', 30)} دقیقه): {st}")
+    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای CDN (هر {config.get('check_interval_minutes', 30)} دقیقه): {st}")
+
+
+@bot.message_handler(commands=['toggle_vpn_online', 'toggle_vpn_summary'])
+@admin_only
+def handle_toggle_vpn_online(message):
+    client = get_nova_client()
+    if not client:
+        bot.reply_to(message, "⚠️ پنل VPN تنظیم نشده است.")
+        return
+    config["send_vpn_periodic_online"] = not config.get("send_vpn_periodic_online", True)
+    save_config(config)
+    st = "فعال ✅" if config["send_vpn_periodic_online"] else "غیرفعال ❌"
+    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای کاربران آنلاین VPN (هر {config.get('check_interval_minutes', 30)} دقیقه): {st}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("set_toggle:"))
+@admin_only
+def callback_toggle_setting(call):
+    action = call.data.split(":")[1]
+    chat_id = call.message.chat.id
+    if action == "vpn_online":
+        config["send_vpn_periodic_online"] = not config.get("send_vpn_periodic_online", True)
+        save_config(config)
+        st = "فعال ✅" if config["send_vpn_periodic_online"] else "غیرفعال ❌"
+        bot.answer_callback_query(call.id, text=f"گزارش دوره‌ای آنلاین‌های VPN: {st}", show_alert=True)
+    elif action == "summary":
+        config["send_periodic_summary"] = not config.get("send_periodic_summary", True)
+        save_config(config)
+        st = "فعال ✅" if config["send_periodic_summary"] else "غیرفعال ❌"
+        bot.answer_callback_query(call.id, text=f"گزارش دوره‌ای CDN: {st}", show_alert=True)
+    # Refresh settings message
+    handle_settings(call.message)
 
 
 # ==================== Nova VPN Panel (Optional Integration) ====================
@@ -1443,8 +1525,26 @@ def background_monitor_worker():
                                 except Exception as e:
                                     print(f"Error sending alert to {cid}: {e}")
 
-                # 4. Optional VPN Panel Quota Alerts (if Nova panel is configured)
+                # 4. Separate Periodic Summary for Live Online VPN Users (every cycle in a separate message)
+                send_vpn_online = cfg.get("send_vpn_periodic_online", True)
                 nova_cli = get_nova_client()
+                if nova_cli and send_vpn_online:
+                    try:
+                        vpn_summary_text = format_vpn_online_message(nova_cli, interval_min=interval_min)
+                        vpn_markup = types.InlineKeyboardMarkup(row_width=2)
+                        vpn_markup.add(
+                            types.InlineKeyboardButton("🔄 به‌روزرسانی آنلاین‌ها", callback_data="nova:online"),
+                            types.InlineKeyboardButton("🛡 منوی مدیریت VPN", callback_data="nova:menu")
+                        )
+                        for cid in admin_ids:
+                            try:
+                                bot.send_message(cid, vpn_summary_text, reply_markup=vpn_markup)
+                            except Exception as e:
+                                print(f"Error sending periodic VPN summary to {cid}: {e}")
+                    except Exception as e:
+                        print(f"Error preparing periodic VPN online summary: {e}")
+
+                # 5. Optional VPN Panel Quota Alerts (if Nova panel is configured)
                 if nova_cli and auto_alert:
                     try:
                         vpn_alerts = nova_cli.get_expiring_or_quota_users(quota_threshold_pct=90.0, days_threshold=2)
