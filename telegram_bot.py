@@ -16,6 +16,7 @@ import sys
 import time
 import json
 import threading
+import datetime
 from functools import wraps
 from typing import Dict, Any, List, Optional
 
@@ -29,7 +30,8 @@ from arvan_api import (
     generate_progress_bar,
     DEFAULT_API_KEY,
     SUPPORTED_PERIODS,
-    PERIOD_LIST
+    PERIOD_LIST,
+    TEHRAN_TZ
 )
 
 try:
@@ -1460,6 +1462,30 @@ def background_monitor_worker():
                                 except Exception as e:
                                     print(f"Error sending spike alert to {cid}: {e}")
 
+                # Check which periodic summaries are enabled
+                send_vpn_online = cfg.get("send_vpn_periodic_online", True)
+                nova_cli = get_nova_client()
+                has_vpn_periodic = bool(nova_cli and send_vpn_online)
+
+                # Send Separator Banner Message before periodic reports
+                if send_summary or has_vpn_periodic:
+                    now_tehran = datetime.datetime.now(TEHRAN_TZ)
+                    time_str = now_tehran.strftime("%H:%M")
+                    date_str = now_tehran.strftime("%Y/%m/%d")
+
+                    divider_text = (
+                        "═════════════════════════\n"
+                        f"📍 <b>شروع گزارش دوره‌ای جدید</b> (هر {interval_min} دقیقه)\n"
+                        f"⏰ <b>زمان ثبت:</b> ساعت <b>{time_str}</b> به وقت تهران ({date_str})\n"
+                        "═════════════════════════"
+                    )
+                    for cid in admin_ids:
+                        try:
+                            bot.send_message(cid, divider_text)
+                        except Exception as e:
+                            print(f"Error sending periodic separator to {cid}: {e}")
+                    time.sleep(0.5)
+
                 # 2. Consolidated Periodic Summary (Includes progress bars, status, warnings & ETA in one single message)
                 if send_summary:
                     summary_text = (
@@ -1493,6 +1519,7 @@ def background_monitor_worker():
                                     print(f"Error sending chart for {w_dom} to {cid}: {e}")
                         except Exception as e:
                             print(f"Error generating 24h chart for warning domain {w_dom}: {e}")
+                    time.sleep(0.5)
 
                 # 3. If periodic summary is disabled but auto_alert is enabled:
                 # Send standalone alert only when a domain changes state (e.g. enters warning or exceeded)
@@ -1526,9 +1553,7 @@ def background_monitor_worker():
                                     print(f"Error sending alert to {cid}: {e}")
 
                 # 4. Separate Periodic Summary for Live Online VPN Users (every cycle in a separate message)
-                send_vpn_online = cfg.get("send_vpn_periodic_online", True)
-                nova_cli = get_nova_client()
-                if nova_cli and send_vpn_online:
+                if has_vpn_periodic:
                     try:
                         vpn_summary_text = format_vpn_online_message(nova_cli, interval_min=interval_min)
                         vpn_markup = types.InlineKeyboardMarkup(row_width=2)
