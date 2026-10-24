@@ -4,6 +4,8 @@
   "arvan_api_key": "YOUR_ARVAN_API_KEY",
   "limit_gb": 8.0,
   "cost_per_gb_toman": 1500,
+  "cdn_check_interval_minutes": 30,
+  "vpn_check_interval_minutes": 60,
   "check_interval_minutes": 30,
   "auto_alert_enabled": true,
   "alert_threshold_percent": 75.0,

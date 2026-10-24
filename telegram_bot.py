@@ -47,6 +47,8 @@ DEFAULT_CONFIG = {
     "arvan_api_key": os.getenv("ARVAN_API_KEY", DEFAULT_API_KEY),
     "limit_gb": 8.0,
     "cost_per_gb_toman": 1500,
+    "cdn_check_interval_minutes": 30,
+    "vpn_check_interval_minutes": 60,
     "check_interval_minutes": 30,
     "auto_alert_enabled": True,
     "alert_threshold_percent": 75.0,
@@ -57,20 +59,36 @@ DEFAULT_CONFIG = {
     "nova_api_key": os.getenv("NOVA_API_KEY", "")
 }
 
+_cached_nova_client: Optional[Any] = None
+_cached_nova_creds: tuple = ("", "")
+
 
 def get_nova_client() -> Optional[Any]:
-    """Retrieve NovaClient instance if configured, otherwise None."""
+    """Retrieve singleton NovaClient instance if configured, preserving session pooling and cache."""
+    global _cached_nova_client, _cached_nova_creds
     if NovaClient is None:
         return None
     cfg = load_config()
     url = cfg.get("nova_api_url", "").strip()
     key = cfg.get("nova_api_key", "").strip()
-    if url and key and not key.startswith("YOUR_"):
-        try:
-            return NovaClient(api_url=url, api_key=key)
-        except Exception:
-            return None
-    return None
+    if not (url and key and not key.startswith("YOUR_")):
+        _cached_nova_client = None
+        _cached_nova_creds = ("", "")
+        return None
+
+    current_creds = (url, key)
+    if _cached_nova_client is not None and _cached_nova_creds == current_creds:
+        return _cached_nova_client
+
+    try:
+        _cached_nova_client = NovaClient(api_url=url, api_key=key)
+        _cached_nova_creds = current_creds
+        return _cached_nova_client
+    except Exception as e:
+        print(f"Error initializing NovaClient: {e}")
+        _cached_nova_client = None
+        _cached_nova_creds = ("", "")
+        return None
 
 
 def load_config() -> Dict[str, Any]:
@@ -92,6 +110,16 @@ def load_config() -> Dict[str, Any]:
 def save_config(cfg: Dict[str, Any]):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+
+def update_config_fields(updates: Dict[str, Any]) -> Dict[str, Any]:
+    """Atomically load disk config, apply updates, save to disk, and synchronize in-memory config."""
+    global config
+    current = load_config()
+    current.update(updates)
+    save_config(current)
+    config = current
+    return current
 
 
 def get_admin_ids() -> List[int]:
@@ -659,12 +687,11 @@ def callback_view_details(call):
         bot.send_message(chat_id, f"❌ خطا در استخراج آمار: {e}")
 
 
-@bot.message_handler(func=lambda msg: msg.text in ["⚙️ وضعیت و تنظیمات", "/settings"])
-@admin_only
-def handle_settings(message):
-    chat_id = message.chat.id
+def build_settings_view() -> tuple:
+    """Build the settings message text and inline keyboard markup."""
     admins = get_admin_ids()
-    interval = config.get("check_interval_minutes", 30)
+    cdn_interval = config.get("cdn_check_interval_minutes", config.get("check_interval_minutes", 30))
+    vpn_interval = config.get("vpn_check_interval_minutes", 60)
     limit = config.get("limit_gb", 8.0)
     cost = config.get("cost_per_gb_toman", 1500)
     auto_alert = "فعال ✅" if config.get("auto_alert_enabled", True) else "غیرفعال ❌"
@@ -676,23 +703,26 @@ def handle_settings(message):
     admins_str = ", ".join(f"<code>{a}</code>" for a in admins) if admins else "تنظیم نشده"
 
     vpn_info = ""
-    vpn_cmd = ""
+    vpn_cmds = ""
     if get_nova_client() is not None:
         vpn_info = (
             f"🛡 <b>پنل VPN (Nova):</b> {nova_status}\n"
-            f"📡 <b>ارسال دوره‌ای آنلاین‌های VPN:</b> {vpn_online_summary}\n"
+            f"📡 <b>گزارش دوره‌ای آنلاین‌های VPN:</b> {vpn_online_summary} (هر {vpn_interval} دقیقه)\n"
         )
-        vpn_cmd = "• <code>/toggle_vpn_online</code> - روشن/خاموش کردن گزارش دوره‌ای آنلاین‌های VPN\n"
+        vpn_cmds = (
+            "• <code>/interval_vpn 60</code> - تنظیم فاصله بررسی VPN (دقیقه)\n"
+            "• <code>/toggle_vpn_online</code> - روشن/خاموش کردن گزارش آنلاین‌های VPN\n"
+        )
 
     text = (
         "⚙️ <b>تنظیمات پیشرفته سامانه مانیتورینگ:</b>\n\n"
         f"👑 <b>شناسه‌های ادمین:</b> {admins_str}\n"
-        f"⏱ <b>فاصله زمانی بررسی:</b> هر {interval} دقیقه یکبار\n"
+        f"🌐 <b>فاصله گزارش دامنه‌های CDN:</b> هر {cdn_interval} دقیقه\n"
         f"🎯 <b>سقف محدودیت رایگان:</b> {limit} گیگابایت در ۲۴ ساعت\n"
         f"💰 <b>تعرفه هر گیگ مازاد:</b> {cost} تومان\n"
         f"🔔 <b>هشدار عبور از سقف:</b> {auto_alert}\n"
         f"⚡️ <b>تشخیص جهش ناگهانی (Spike):</b> {spike_alert}\n"
-        f"📋 <b>ارسال خلاصه وضعیت دوره‌ای CDN:</b> {summary}\n"
+        f"📋 <b>گزارش دوره‌ای CDN:</b> {summary}\n"
         f"{vpn_info}\n"
         "<b>دستورات مدیریتی ادمین:</b>\n"
         "• <code>/addadmin 123456789</code> - اضافه کردن ادمین\n"
@@ -700,16 +730,26 @@ def handle_settings(message):
         "• <code>/admins</code> - مشاهده لیست ادمین‌ها\n"
         "• <code>/setlimit 8.0</code> - تغییر سقف مجاز (گیگابایت)\n"
         "• <code>/setcost 1500</code> - تنظیم تعرفه هر گیگ به تومان\n"
-        "• <code>/interval 30</code> - تنظیم فاصله بررسی (دقیقه)\n"
+        "• <code>/interval_cdn 30</code> - تنظیم فاصله گزارش CDN (دقیقه)\n"
+        f"{vpn_cmds}"
+        "• <code>/interval 30</code> - تنظیم همزمان فاصله گزارش‌ها (دقیقه)\n"
         "• <code>/toggle_alert</code> - روشن/خاموش کردن هشدار سقف\n"
         "• <code>/toggle_spike</code> - روشن/خاموش کردن هشدار جهش ناگهانی\n"
         "• <code>/toggle_summary</code> - روشن/خاموش کردن گزارش دوره‌ای CDN\n"
-        f"{vpn_cmd}"
     )
+
     markup = types.InlineKeyboardMarkup(row_width=1)
     if get_nova_client() is not None:
         markup.add(types.InlineKeyboardButton(f"📡 سوییچ گزارش دوره‌ای آنلاین‌های VPN ({vpn_online_summary})", callback_data="set_toggle:vpn_online"))
     markup.add(types.InlineKeyboardButton(f"📋 سوییچ گزارش دوره‌ای CDN ({summary})", callback_data="set_toggle:summary"))
+    return text, markup
+
+
+@bot.message_handler(func=lambda msg: msg.text in ["⚙️ وضعیت و تنظیمات", "/settings"])
+@admin_only
+def handle_settings(message):
+    chat_id = message.chat.id
+    text, markup = build_settings_view()
     bot.send_message(chat_id, text, reply_markup=markup)
 
 
@@ -730,14 +770,12 @@ def handle_add_admin(message):
         return
     try:
         new_id = int(parts[1])
-        cfg = load_config()
         current_admins = get_admin_ids()
         if new_id in current_admins:
-            bot.reply_to(message, f"این شناسه از قبل در لیست ادمین‌ها قرار دارد.")
+            bot.reply_to(message, "این شناسه از قبل در لیست ادمین‌ها قرار دارد.")
             return
         current_admins.append(new_id)
-        cfg["admin_chat_ids"] = current_admins
-        save_config(cfg)
+        update_config_fields({"admin_chat_ids": current_admins})
         bot.reply_to(message, f"✅ شناسه <code>{new_id}</code> به لیست ادمین‌ها اضافه شد.")
     except ValueError:
         bot.reply_to(message, "❌ لطفاً شناسه عددی معتبر وارد کنید.")
@@ -752,14 +790,12 @@ def handle_del_admin(message):
         return
     try:
         rem_id = int(parts[1])
-        cfg = load_config()
         current_admins = get_admin_ids()
         if rem_id not in current_admins:
             bot.reply_to(message, "این شناسه در لیست ادمین‌ها یافت نشد.")
             return
         current_admins.remove(rem_id)
-        cfg["admin_chat_ids"] = current_admins
-        save_config(cfg)
+        update_config_fields({"admin_chat_ids": current_admins})
         bot.reply_to(message, f"✅ شناسه <code>{rem_id}</code> از لیست ادمین‌ها حذف شد.")
     except ValueError:
         bot.reply_to(message, "❌ لطفاً شناسه عددی معتبر وارد کنید.")
@@ -771,8 +807,7 @@ def handle_setlimit(message):
     try:
         parts = message.text.split()
         val = float(parts[1])
-        config["limit_gb"] = val
-        save_config(config)
+        update_config_fields({"limit_gb": val})
         bot.reply_to(message, f"✅ سقف محدودیت روی {val:.1f} گیگابایت تنظیم شد.")
     except Exception:
         bot.reply_to(message, "فرمت دستور: <code>/setlimit 8.0</code>")
@@ -784,11 +819,40 @@ def handle_setcost(message):
     try:
         parts = message.text.split()
         val = int(parts[1])
-        config["cost_per_gb_toman"] = val
-        save_config(config)
+        update_config_fields({"cost_per_gb_toman": val})
         bot.reply_to(message, f"✅ تعرفه هر گیگابایت مازاد روی {val:,} تومان تنظیم شد.")
     except Exception:
         bot.reply_to(message, "فرمت دستور: <code>/setcost 1500</code>")
+
+
+@bot.message_handler(commands=['interval_cdn'])
+@admin_only
+def handle_setinterval_cdn(message):
+    try:
+        parts = message.text.split()
+        val = int(parts[1])
+        if val < 5:
+            bot.reply_to(message, "حداقل زمان بررسی CDN ۵ دقیقه است.")
+            return
+        update_config_fields({"cdn_check_interval_minutes": val, "check_interval_minutes": val})
+        bot.reply_to(message, f"✅ فاصله بررسی و گزارش دامنه‌های CDN روی هر {val} دقیقه تنظیم شد.")
+    except Exception:
+        bot.reply_to(message, "فرمت دستور: <code>/interval_cdn 30</code>")
+
+
+@bot.message_handler(commands=['interval_vpn'])
+@admin_only
+def handle_setinterval_vpn(message):
+    try:
+        parts = message.text.split()
+        val = int(parts[1])
+        if val < 5:
+            bot.reply_to(message, "حداقل زمان بررسی آنلاین‌های VPN ۵ دقیقه است.")
+            return
+        update_config_fields({"vpn_check_interval_minutes": val})
+        bot.reply_to(message, f"✅ فاصله بررسی و گزارش کاربران آنلاین VPN روی هر {val} دقیقه تنظیم شد.")
+    except Exception:
+        bot.reply_to(message, "فرمت دستور: <code>/interval_vpn 60</code>")
 
 
 @bot.message_handler(commands=['interval'])
@@ -800,9 +864,18 @@ def handle_setinterval(message):
         if val < 5:
             bot.reply_to(message, "حداقل زمان بررسی ۵ دقیقه است.")
             return
-        config["check_interval_minutes"] = val
-        save_config(config)
-        bot.reply_to(message, f"✅ فاصله بررسی روی هر {val} دقیقه تنظیم شد.")
+        update_config_fields({
+            "cdn_check_interval_minutes": val,
+            "vpn_check_interval_minutes": val,
+            "check_interval_minutes": val
+        })
+        bot.reply_to(
+            message,
+            f"✅ فاصله بررسی هم برای دامنه‌های CDN و هم برای آنلاین‌های VPN روی هر {val} دقیقه تنظیم شد.\n"
+            f"💡 برای تنظیم زمان‌بندی مستقل هر کدام:\n"
+            f"• <code>/interval_cdn 30</code> (تنظیم فقط CDN)\n"
+            f"• <code>/interval_vpn 60</code> (تنظیم فقط VPN)"
+        )
     except Exception:
         bot.reply_to(message, "فرمت دستور: <code>/interval 30</code>")
 
@@ -810,28 +883,29 @@ def handle_setinterval(message):
 @bot.message_handler(commands=['toggle_alert'])
 @admin_only
 def handle_toggle_alert(message):
-    config["auto_alert_enabled"] = not config.get("auto_alert_enabled", True)
-    save_config(config)
-    st = "فعال ✅" if config["auto_alert_enabled"] else "غیرفعال ❌"
+    new_val = not config.get("auto_alert_enabled", True)
+    update_config_fields({"auto_alert_enabled": new_val})
+    st = "فعال ✅" if new_val else "غیرفعال ❌"
     bot.reply_to(message, f"وضعیت هشدار سقف: {st}")
 
 
 @bot.message_handler(commands=['toggle_spike'])
 @admin_only
 def handle_toggle_spike(message):
-    config["spike_alert_enabled"] = not config.get("spike_alert_enabled", True)
-    save_config(config)
-    st = "فعال ✅" if config["spike_alert_enabled"] else "غیرفعال ❌"
+    new_val = not config.get("spike_alert_enabled", True)
+    update_config_fields({"spike_alert_enabled": new_val})
+    st = "فعال ✅" if new_val else "غیرفعال ❌"
     bot.reply_to(message, f"وضعیت هشدار جهش ترافیک: {st}")
 
 
 @bot.message_handler(commands=['toggle_summary'])
 @admin_only
 def handle_toggle_summary(message):
-    config["send_periodic_summary"] = not config.get("send_periodic_summary", True)
-    save_config(config)
-    st = "فعال ✅" if config["send_periodic_summary"] else "غیرفعال ❌"
-    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای CDN (هر {config.get('check_interval_minutes', 30)} دقیقه): {st}")
+    new_val = not config.get("send_periodic_summary", True)
+    update_config_fields({"send_periodic_summary": new_val})
+    st = "فعال ✅" if new_val else "غیرفعال ❌"
+    cdn_min = config.get("cdn_check_interval_minutes", config.get("check_interval_minutes", 30))
+    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای CDN (هر {cdn_min} دقیقه): {st}")
 
 
 @bot.message_handler(commands=['toggle_vpn_online', 'toggle_vpn_summary'])
@@ -841,10 +915,11 @@ def handle_toggle_vpn_online(message):
     if not client:
         bot.reply_to(message, "⚠️ پنل VPN تنظیم نشده است.")
         return
-    config["send_vpn_periodic_online"] = not config.get("send_vpn_periodic_online", True)
-    save_config(config)
-    st = "فعال ✅" if config["send_vpn_periodic_online"] else "غیرفعال ❌"
-    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای کاربران آنلاین VPN (هر {config.get('check_interval_minutes', 30)} دقیقه): {st}")
+    new_val = not config.get("send_vpn_periodic_online", True)
+    update_config_fields({"send_vpn_periodic_online": new_val})
+    st = "فعال ✅" if new_val else "غیرفعال ❌"
+    vpn_min = config.get("vpn_check_interval_minutes", 60)
+    bot.reply_to(message, f"وضعیت ارسال گزارش دوره‌ای کاربران آنلاین VPN (هر {vpn_min} دقیقه): {st}")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("set_toggle:"))
@@ -853,17 +928,21 @@ def callback_toggle_setting(call):
     action = call.data.split(":")[1]
     chat_id = call.message.chat.id
     if action == "vpn_online":
-        config["send_vpn_periodic_online"] = not config.get("send_vpn_periodic_online", True)
-        save_config(config)
-        st = "فعال ✅" if config["send_vpn_periodic_online"] else "غیرفعال ❌"
-        bot.answer_callback_query(call.id, text=f"گزارش دوره‌ای آنلاین‌های VPN: {st}", show_alert=True)
+        new_val = not config.get("send_vpn_periodic_online", True)
+        update_config_fields({"send_vpn_periodic_online": new_val})
+        st = "فعال ✅" if new_val else "غیرفعال ❌"
+        bot.answer_callback_query(call.id, text=f"گزارش دوره‌ای آنلاین‌های VPN: {st}")
     elif action == "summary":
-        config["send_periodic_summary"] = not config.get("send_periodic_summary", True)
-        save_config(config)
-        st = "فعال ✅" if config["send_periodic_summary"] else "غیرفعال ❌"
-        bot.answer_callback_query(call.id, text=f"گزارش دوره‌ای CDN: {st}", show_alert=True)
-    # Refresh settings message
-    handle_settings(call.message)
+        new_val = not config.get("send_periodic_summary", True)
+        update_config_fields({"send_periodic_summary": new_val})
+        st = "فعال ✅" if new_val else "غیرفعال ❌"
+        bot.answer_callback_query(call.id, text=f"گزارش دوره‌ای CDN: {st}")
+
+    text, markup = build_settings_view()
+    try:
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
+    except Exception:
+        pass
 
 
 # ==================== Nova VPN Panel (Optional Integration) ====================
@@ -934,7 +1013,7 @@ def callback_nova_online(call):
 
     bot.answer_callback_query(call.id, text="در حال استخراج کاربران آنلاین...")
     try:
-        summary = client.get_online_summary()
+        summary = client.get_online_summary(force_refresh=True)
         users = summary.get("users", [])
         total_online = summary.get("total_online_users", len(users))
         total_devices = summary.get("total_devices", sum(u.get("devices", 0) for u in users))
@@ -1009,7 +1088,7 @@ def callback_nova_all_users(call):
 
     try:
         all_users = client.get_all_users()
-        online_data = client._request("online").get("online", {})
+        online_data = client.get_online_data().get("online", {})
         page_size = 8
         total_users = len(all_users)
         total_pages = max(1, (total_users + page_size - 1) // page_size)
@@ -1086,7 +1165,7 @@ def callback_nova_user_detail(call):
             bot.send_message(chat_id, f"❌ کاربری با شناسه {uid} یافت نشد.")
             return
 
-        online_data = client._request("online").get("online", {})
+        online_data = client.get_online_data().get("online", {})
         devs = online_data.get(uid, 0)
         conn_str = f"⚡️ آنلاین ({devs} دستگاه فعال)" if devs > 0 else "⚪️ آفلاین"
 
@@ -1430,21 +1509,60 @@ def background_monitor_worker():
     last_alert_status = {}
     last_nova_alerted_quota = set()
 
+    last_cdn_run = 0.0
+    last_vpn_run = 0.0
+
     while True:
         try:
             cfg = load_config()
-            interval_min = cfg.get("check_interval_minutes", 30)
             admin_ids = get_admin_ids()
-            limit_gb = cfg.get("limit_gb", 8.0)
-            cost_gb = cfg.get("cost_per_gb_toman", 1500)
+            if not admin_ids:
+                time.sleep(20)
+                continue
+
+            cdn_interval_min = cfg.get("cdn_check_interval_minutes", cfg.get("check_interval_minutes", 30))
+            vpn_interval_min = cfg.get("vpn_check_interval_minutes", 60)
+            cdn_interval_sec = max(300, cdn_interval_min * 60)
+            vpn_interval_sec = max(300, vpn_interval_min * 60)
+
+            send_cdn_summary = cfg.get("send_periodic_summary", True)
+            send_vpn_online = cfg.get("send_vpn_periodic_online", True)
             auto_alert = cfg.get("auto_alert_enabled", True)
             spike_alert = cfg.get("spike_alert_enabled", True)
-            send_summary = cfg.get("send_periodic_summary", True)
+            limit_gb = cfg.get("limit_gb", 8.0)
+            cost_gb = cfg.get("cost_per_gb_toman", 1500)
+            nova_cli = get_nova_client()
 
-            if admin_ids:
+            now = time.time()
+            due_cdn = (now - last_cdn_run) >= cdn_interval_sec
+            due_vpn = bool(nova_cli and (now - last_vpn_run) >= vpn_interval_sec)
+
+            now_tehran = datetime.datetime.now(TEHRAN_TZ)
+            time_str = now_tehran.strftime("%H:%M")
+            date_str = now_tehran.strftime("%Y/%m/%d")
+
+            # 1. Unified separator banner when both CDN and VPN reports are due simultaneously
+            if due_cdn and due_vpn and (send_cdn_summary or send_vpn_online):
+                divider_text = (
+                    "═════════════════════════\n"
+                    "📍 <b>شروع گزارش جامع دوره‌ای سیستم</b>\n"
+                    f"⏰ <b>زمان ثبت:</b> ساعت <b>{time_str}</b> به وقت تهران ({date_str})\n"
+                    f"📊 شامل گزارش CDN (هر {cdn_interval_min} د) و کاربران VPN (هر {vpn_interval_min} د)\n"
+                    "═════════════════════════"
+                )
+                for cid in admin_ids:
+                    try:
+                        bot.send_message(cid, divider_text)
+                    except Exception as e:
+                        print(f"Error sending separator to {cid}: {e}")
+                time.sleep(0.5)
+
+            # 2. CDN Monitoring Block
+            if due_cdn:
+                last_cdn_run = now
                 limit_items = arvan_client.check_8gb_limits(limit_gb=limit_gb)
 
-                # 1. Anomaly Traffic Spike Detection
+                # Anomaly Traffic Spike Detection
                 if spike_alert:
                     for item in limit_items:
                         domain = item["domain"]
@@ -1462,20 +1580,11 @@ def background_monitor_worker():
                                 except Exception as e:
                                     print(f"Error sending spike alert to {cid}: {e}")
 
-                # Check which periodic summaries are enabled
-                send_vpn_online = cfg.get("send_vpn_periodic_online", True)
-                nova_cli = get_nova_client()
-                has_vpn_periodic = bool(nova_cli and send_vpn_online)
-
-                # Send Separator Banner Message before periodic reports
-                if send_summary or has_vpn_periodic:
-                    now_tehran = datetime.datetime.now(TEHRAN_TZ)
-                    time_str = now_tehran.strftime("%H:%M")
-                    date_str = now_tehran.strftime("%Y/%m/%d")
-
+                # Standalone CDN separator if only CDN is due
+                if not due_vpn and send_cdn_summary:
                     divider_text = (
                         "═════════════════════════\n"
-                        f"📍 <b>شروع گزارش دوره‌ای جدید</b> (هر {interval_min} دقیقه)\n"
+                        f"🌐 <b>شروع گزارش دوره‌ای CDN ابر آروان</b> (هر {cdn_interval_min} دقیقه)\n"
                         f"⏰ <b>زمان ثبت:</b> ساعت <b>{time_str}</b> به وقت تهران ({date_str})\n"
                         "═════════════════════════"
                     )
@@ -1483,13 +1592,12 @@ def background_monitor_worker():
                         try:
                             bot.send_message(cid, divider_text)
                         except Exception as e:
-                            print(f"Error sending periodic separator to {cid}: {e}")
+                            print(f"Error sending CDN separator to {cid}: {e}")
                     time.sleep(0.5)
 
-                # 2. Consolidated Periodic Summary (Includes progress bars, status, warnings & ETA in one single message)
-                if send_summary:
+                if send_cdn_summary:
                     summary_text = (
-                        f"⏰ <b>گزارش دوره‌ای مانیتورینگ CDN</b> (هر {interval_min} دقیقه)\n\n" +
+                        f"⏰ <b>گزارش دوره‌ای مانیتورینگ CDN</b> (هر {cdn_interval_min} دقیقه)\n\n" +
                         format_status_message(arvan_client, limit_gb, cost_gb)
                     )
                     for cid in admin_ids:
@@ -1521,8 +1629,6 @@ def background_monitor_worker():
                             print(f"Error generating 24h chart for warning domain {w_dom}: {e}")
                     time.sleep(0.5)
 
-                # 3. If periodic summary is disabled but auto_alert is enabled:
-                # Send standalone alert only when a domain changes state (e.g. enters warning or exceeded)
                 elif auto_alert:
                     for item in limit_items:
                         domain = item["domain"]
@@ -1552,10 +1658,35 @@ def background_monitor_worker():
                                 except Exception as e:
                                     print(f"Error sending alert to {cid}: {e}")
 
-                # 4. Separate Periodic Summary for Live Online VPN Users (every cycle in a separate message)
-                if has_vpn_periodic:
+                # Record current domain status to avoid duplicate notifications in subsequent cycles
+                for item in limit_items:
+                    domain = item["domain"]
+                    is_exceeded = item.get("is_exceeded", False)
+                    is_warning = item.get("is_warning", False)
+                    last_alert_status[domain] = "exceeded" if is_exceeded else ("warning" if is_warning else "safe")
+
+            # 3. VPN Monitoring Block
+            if due_vpn:
+                last_vpn_run = now
+
+                # Standalone VPN separator if only VPN is due
+                if not due_cdn and send_vpn_online:
+                    divider_text = (
+                        "═════════════════════════\n"
+                        f"🛡 <b>شروع گزارش دوره‌ای کاربران آنلاین VPN</b> (هر {vpn_interval_min} دقیقه)\n"
+                        f"⏰ <b>زمان ثبت:</b> ساعت <b>{time_str}</b> به وقت تهران ({date_str})\n"
+                        "═════════════════════════"
+                    )
+                    for cid in admin_ids:
+                        try:
+                            bot.send_message(cid, divider_text)
+                        except Exception as e:
+                            print(f"Error sending VPN separator to {cid}: {e}")
+                    time.sleep(0.5)
+
+                if send_vpn_online:
                     try:
-                        vpn_summary_text = format_vpn_online_message(nova_cli, interval_min=interval_min)
+                        vpn_summary_text = format_vpn_online_message(nova_cli, interval_min=vpn_interval_min)
                         vpn_markup = types.InlineKeyboardMarkup(row_width=2)
                         vpn_markup.add(
                             types.InlineKeyboardButton("🔄 به‌روزرسانی آنلاین‌ها", callback_data="nova:online"),
@@ -1569,12 +1700,14 @@ def background_monitor_worker():
                     except Exception as e:
                         print(f"Error preparing periodic VPN online summary: {e}")
 
-                # 5. Optional VPN Panel Quota Alerts (if Nova panel is configured)
-                if nova_cli and auto_alert:
+                # Optional VPN Panel Quota Alerts
+                if auto_alert:
                     try:
                         vpn_alerts = nova_cli.get_expiring_or_quota_users(quota_threshold_pct=90.0, days_threshold=2)
+                        current_nearing_ids = set()
                         for u in vpn_alerts.get("nearing_quota", []):
                             uid = u["id"]
+                            current_nearing_ids.add(uid)
                             if uid not in last_nova_alerted_quota:
                                 last_nova_alerted_quota.add(uid)
                                 u_name = u.get("name", uid)
@@ -1590,21 +1723,15 @@ def background_monitor_worker():
                                         bot.send_message(cid, alert_vpn)
                                     except Exception as e:
                                         print(f"Error sending VPN quota alert: {e}")
+                        # Keep only users still nearing quota so refreshed users can re-trigger
+                        last_nova_alerted_quota = {uid for uid in last_nova_alerted_quota if uid in current_nearing_ids}
                     except Exception as e:
                         print(f"Error in background VPN alert check: {e}")
-
-                # Record current domain status to avoid duplicate notifications in subsequent cycles
-                for item in limit_items:
-                    domain = item["domain"]
-                    is_exceeded = item.get("is_exceeded", False)
-                    is_warning = item.get("is_warning", False)
-                    last_alert_status[domain] = "exceeded" if is_exceeded else ("warning" if is_warning else "safe")
 
         except Exception as e:
             print(f"Error in background monitor: {e}")
 
-        sleep_secs = max(60, config.get("check_interval_minutes", 30) * 60)
-        time.sleep(sleep_secs)
+        time.sleep(20)
 
 
 def main():
