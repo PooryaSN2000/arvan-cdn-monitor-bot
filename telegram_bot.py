@@ -17,8 +17,14 @@ import time
 import json
 import threading
 import datetime
+import html
 from functools import wraps
 from typing import Dict, Any, List, Optional
+
+
+def safe_html(text: Any) -> str:
+    """Escape text for safe inclusion in Telegram HTML formatted messages."""
+    return html.escape(str(text))
 
 import telebot
 from telebot import types
@@ -1071,7 +1077,7 @@ def callback_nova_online(call):
             reply_markup=markup
         )
     except Exception as e:
-        bot.send_message(chat_id, f"❌ خطا در دریافت اطلاعات کاربران آنلاین: {e}")
+        bot.send_message(chat_id, f"❌ خطا در دریافت اطلاعات کاربران آنلاین: <code>{safe_html(e)}</code>")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("nova:users:"))
@@ -1144,7 +1150,7 @@ def callback_nova_all_users(call):
             reply_markup=markup
         )
     except Exception as e:
-        bot.send_message(chat_id, f"❌ خطا در دریافت لیست کاربران: {e}")
+        bot.send_message(chat_id, f"❌ خطا در دریافت لیست کاربران: <code>{safe_html(e)}</code>")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("nova:user:"))
@@ -1219,7 +1225,7 @@ def callback_nova_user_detail(call):
             reply_markup=markup
         )
     except Exception as e:
-        bot.send_message(chat_id, f"❌ خطا در دریافت مشخصات کاربر: {e}")
+        bot.send_message(chat_id, f"❌ خطا در دریافت مشخصات کاربر: <code>{safe_html(e)}</code>")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("nova:toggle:"))
@@ -1422,7 +1428,7 @@ def callback_nova_stats(call):
 
         bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
     except Exception as e:
-        bot.send_message(chat_id, f"❌ خطا در دریافت آمار سرور: {e}")
+        bot.send_message(chat_id, f"❌ خطا در دریافت آمار سرور: <code>{safe_html(e)}</code>")
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "nova:alerts")
@@ -1493,7 +1499,7 @@ def callback_nova_alerts(call):
 
         bot.edit_message_text("\n".join(lines), chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
     except Exception as e:
-        bot.send_message(chat_id, f"❌ خطا در استخراج گزارش تمدید: {e}")
+        bot.send_message(chat_id, f"❌ خطا در استخراج گزارش تمدید: <code>{safe_html(e)}</code>")
 
 
 @bot.message_handler(func=lambda message: True)

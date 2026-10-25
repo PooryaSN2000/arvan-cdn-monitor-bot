@@ -1,41 +1,34 @@
 """
 Nova VPN Panel API Client (Optional Integration)
 Handles connection, online sessions, quota monitoring, and user management for Nova VPN panel.
-Optimized with persistent HTTP connection pooling and smart in-memory caching to minimize server load.
+Optimized with standard TLS to cleanly pass Cloudflare WAF without bot challenges,
+combined with smart in-memory caching to eliminate redundant server load.
 """
 
+import json
 import time
 import datetime
+import urllib.request
+import urllib.error
+import urllib.parse
 from typing import List, Dict, Any, Optional
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from arvan_api import format_bytes, generate_progress_bar
+
+# Complete modern browser User-Agent that Cloudflare WAF accepts cleanly with standard TLS
+CHROME_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
 
 
 class NovaClient:
     """
     High-performance REST API client for Nova VPN Panel.
-    Uses connection pooling and short-lived caching to reduce API load on the VPN server.
+    Uses standard urllib.request to avoid Cloudflare bot fingerprint mismatches,
+    and maintains short-lived in-memory caches to reduce API load on the VPN server.
     """
     def __init__(self, api_url: str, api_key: str):
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key.strip()
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-
-        # Initialize persistent session with connection pooling
-        self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-            "User-Agent": self.user_agent
-        })
-
-        retries = Retry(total=2, backoff_factor=0.5, status_forcelist=[502, 503, 504])
-        adapter = HTTPAdapter(max_retries=retries, pool_connections=2, pool_maxsize=5)
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
+        self.user_agent = CHROME_USER_AGENT
 
         # In-memory caches to prevent redundant API queries
         self._users_cache: Optional[List[Dict[str, Any]]] = None
@@ -61,29 +54,37 @@ class NovaClient:
         timeout: int = 15
     ) -> Dict[str, Any]:
         url = f"{self.api_url}/{endpoint.lstrip('/')}"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+            "User-Agent": self.user_agent
+        }
+
+        body_bytes = None
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+            body_bytes = json.dumps(data).encode("utf-8")
+
+        req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method.upper())
         try:
-            if method.upper() == "GET":
-                resp = self.session.get(url, timeout=timeout)
-            elif method.upper() == "POST":
-                resp = self.session.post(url, json=data, timeout=timeout)
-            elif method.upper() == "PATCH":
-                resp = self.session.patch(url, json=data, timeout=timeout)
-            elif method.upper() == "DELETE":
-                resp = self.session.delete(url, timeout=timeout)
-            else:
-                resp = self.session.request(method, url, json=data, timeout=timeout)
-
-            if not resp.ok:
-                try:
-                    err_json = resp.json()
-                    msg = err_json.get("detail") or err_json.get("title") or err_json.get("message") or err_json.get("error") or str(err_json)
-                except Exception:
-                    msg = resp.text[:200]
-                raise RuntimeError(f"Nova API Error (HTTP {resp.status_code}): {msg}")
-
-            return resp.json()
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Network error connecting to Nova Panel: {e}")
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                body = response.read().decode("utf-8")
+                return json.loads(body)
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="replace")
+            try:
+                err_json = json.loads(err_body)
+                msg = err_json.get("detail") or err_json.get("title") or err_json.get("message") or err_json.get("error") or str(err_json)
+            except Exception:
+                # Sanitize HTML tags (e.g. from Cloudflare) to prevent breaking Telegram markup
+                msg = err_body[:120].replace("<", "").replace(">", "").strip()
+                if not msg:
+                    msg = f"HTTP {e.code}"
+            raise RuntimeError(f"Nova API Error (HTTP {e.code}): {msg}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Network error connecting to Nova Panel: {e.reason}")
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error communicating with Nova Panel: {e}")
 
     def is_healthy(self) -> bool:
         """Check API connectivity and authentication validity."""
@@ -137,7 +138,7 @@ class NovaClient:
                     if u.get("id") == user_id:
                         return u
 
-            res = self._request(f"users/{requests.utils.quote(user_id)}")
+            res = self._request(f"users/{urllib.parse.quote(user_id)}")
             return res.get("user")
         except Exception:
             return None
@@ -192,7 +193,7 @@ class NovaClient:
     def toggle_user(self, user_id: str, enabled: bool) -> bool:
         """Enable or disable a user account."""
         res = self._request(
-            f"users/{requests.utils.quote(user_id)}",
+            f"users/{urllib.parse.quote(user_id)}",
             method="PATCH",
             data={"enabled": enabled}
         )
@@ -261,7 +262,7 @@ class NovaClient:
         additional_bytes = int(additional_gb * (1024 ** 3))
         new_quota = current_quota + additional_bytes
         res = self._request(
-            f"users/{requests.utils.quote(user_id)}",
+            f"users/{urllib.parse.quote(user_id)}",
             method="PATCH",
             data={"quotaBytes": new_quota}
         )
@@ -271,7 +272,7 @@ class NovaClient:
     def reset_user_traffic(self, user_id: str) -> bool:
         """Reset user consumed traffic back to 0."""
         res = self._request(
-            f"users/{requests.utils.quote(user_id)}",
+            f"users/{urllib.parse.quote(user_id)}",
             method="PATCH",
             data={"used": 0, "up": 0, "down": 0}
         )
@@ -296,7 +297,7 @@ class NovaClient:
         new_exp = base_date + datetime.timedelta(days=days)
         new_exp_str = new_exp.strftime("%Y-%m-%d")
         res = self._request(
-            f"users/{requests.utils.quote(user_id)}",
+            f"users/{urllib.parse.quote(user_id)}",
             method="PATCH",
             data={"expiry": new_exp_str}
         )
