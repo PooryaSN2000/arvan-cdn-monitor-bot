@@ -45,7 +45,8 @@ try:
 except ImportError:
     NovaClient = None
 
-CONFIG_FILE = "bot_config.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(BASE_DIR, "bot_config.json")
 
 DEFAULT_CONFIG = {
     "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
