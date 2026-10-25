@@ -1612,6 +1612,7 @@ def background_monitor_worker():
                             bot.send_message(cid, summary_text)
                         except Exception as e:
                             print(f"Error sending summary to {cid}: {e}")
+                    print(f"[{time_str}] ✅ Periodic CDN summary sent to {len(admin_ids)} admin(s).")
 
                     # Automatically send 24h traffic charts for domains nearing or exceeding quota (>= 75%)
                     warning_items = [it for it in limit_items if it.get("is_warning") or it.get("is_exceeded")]
@@ -1704,6 +1705,7 @@ def background_monitor_worker():
                                 bot.send_message(cid, vpn_summary_text, reply_markup=vpn_markup)
                             except Exception as e:
                                 print(f"Error sending periodic VPN summary to {cid}: {e}")
+                        print(f"[{time_str}] ✅ Periodic VPN online summary sent to {len(admin_ids)} admin(s).")
                     except Exception as e:
                         print(f"Error preparing periodic VPN online summary: {e}")
 
